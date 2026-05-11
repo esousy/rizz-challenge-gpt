@@ -1050,6 +1050,49 @@ function ComingSoonTab({
 
 // ── Main Admin Page ────────────────────────────────────────────────────────────
 
+function StandaloneBackendNotice({ tab }: { tab: AdminTab }) {
+  const copy =
+    tab === "ai-settings"
+      ? {
+          title: "AI settings are configured in Vercel",
+          body: "This standalone deployment does not have a Caffeine/ICP backend canister, so the admin panel cannot store an API key in-app. Add OPENAI_API_KEY in Vercel Project Settings -> Environment Variables, then redeploy.",
+        }
+      : tab === "app-settings"
+        ? {
+            title: "Free plan limits are using app defaults",
+            body: "Ranked session, hint, and assist limits are enforced client-side with the current defaults. In-app editing requires a deployed backend canister.",
+          }
+        : {
+            title: "No backend datastore connected",
+            body: "User management requires the Caffeine/ICP backend canister. The Vercel-only deployment can run the game and Live AI proxy, but it cannot list or manage backend users.",
+          };
+
+  return (
+    <div className="max-w-xl bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col gap-4">
+      <div className="flex items-start gap-3">
+        <AlertTriangle
+          size={18}
+          className="text-amber-400 flex-shrink-0 mt-0.5"
+        />
+        <div>
+          <p className="text-sm font-semibold text-white">{copy.title}</p>
+          <p className="text-sm text-zinc-400 mt-1 leading-relaxed">
+            {copy.body}
+          </p>
+        </div>
+      </div>
+      <div className="rounded-xl bg-zinc-950 border border-zinc-800 px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
+          Required production env
+        </p>
+        <code className="block mt-2 text-sm text-emerald-400">
+          OPENAI_API_KEY
+        </code>
+      </div>
+    </div>
+  );
+}
+
 export default function Admin() {
   const { actor, isFetching } = useActor(createActor);
   const {
@@ -1267,17 +1310,10 @@ export default function Admin() {
                 isFetching={isFetching}
               />
             )}
-            {activeTab === "app-settings" && !actor && (
-              <div className="flex items-center justify-center py-16">
-                <span className="w-7 h-7 rounded-full border-2 border-violet-400/30 border-t-violet-400 animate-spin" />
-              </div>
-            )}
-            {(activeTab === "users" || activeTab === "ai-settings") &&
-              !actor && (
-                <div className="flex items-center justify-center py-16">
-                  <span className="w-7 h-7 rounded-full border-2 border-violet-400/30 border-t-violet-400 animate-spin" />
-                </div>
-              )}
+            {(activeTab === "users" ||
+              activeTab === "ai-settings" ||
+              activeTab === "app-settings") &&
+              !actor && <StandaloneBackendNotice tab={activeTab} />}
           </motion.div>
         </main>
       </div>
