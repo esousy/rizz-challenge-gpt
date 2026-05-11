@@ -1,0 +1,11 @@
+{
+  "buildCommand": "pnpm --filter @caffeine/template-frontend build",
+  "outputDirectory": "src/frontend/dist",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "rewrites": [
+    {
+      "source": "/((?!api/.*).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

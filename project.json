@@ -1,0 +1,26 @@
+{
+  "overview": "Rizz Me If You Can is a mobile-first, progression-based social strategy game where users practice flirting and social intelligence with emotionally dynamic AI characters. Features Free vs Pro plans with configurable limits and upgrade prompts.",
+  "features": [
+    "Free vs Pro plan structure with configurable Free Plan limits",
+    "Daily ranked session limits for Free users (default: 3/day)",
+    "Per-session Rizz Assist limits for Free users (default: 1/session)",
+    "Per-session Hint limits for Free users (default: 3/session)",
+    "Admin Panel Free Plan Settings with editable limits",
+    "Admin User Management with plan column and Free/Pro switcher",
+    "Upgrade modal (Unlock Rizz Pro) on limit hits — no payments yet",
+    "Pro users bypass all limits",
+    "Tempting upgrade prompts that preserve immersion",
+    "5-round ranked AI chat sessions with emotional AI characters"
+  ],
+  "category": "games",
+  "tags": [
+    "social-strategy",
+    "dating-simulator",
+    "ai-chat",
+    "gamification",
+    "progression",
+    "monetization",
+    "freemium"
+  ],
+  "last_updated": "2026-05-10T10:55:02.965Z"
+}

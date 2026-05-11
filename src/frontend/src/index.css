@@ -1,0 +1,204 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-display: "Space Grotesk", sans-serif;
+    --font-body: "General Sans", sans-serif;
+    --font-mono: "Geist Mono", monospace;
+    --radius: 0.625rem;
+
+    --background: 0.99 0 0;
+    --foreground: 0.15 0 0;
+    --card: 0.97 0 0;
+    --card-foreground: 0.15 0 0;
+    --popover: 0.98 0 0;
+    --popover-foreground: 0.15 0 0;
+
+    --primary: 0.65 0.22 280;
+    --primary-foreground: 0.98 0 0;
+
+    --secondary: 0.92 0.02 290;
+    --secondary-foreground: 0.2 0 0;
+    --muted: 0.92 0 0;
+    --muted-foreground: 0.5 0 0;
+
+    --accent: 0.65 0.22 280;
+    --accent-foreground: 0.98 0 0;
+
+    --destructive: 0.55 0.22 25;
+    --destructive-foreground: 0.98 0 0;
+
+    --border: 0.88 0.01 280;
+    --input: 0.88 0.01 280;
+    --ring: 0.65 0.22 280;
+
+    --chart-1: 0.65 0.22 40;
+    --chart-2: 0.6 0.12 185;
+    --chart-3: 0.4 0.07 227;
+    --chart-4: 0.83 0.19 84;
+    --chart-5: 0.77 0.19 70;
+
+    --sidebar: 0.98 0 0;
+    --sidebar-foreground: 0.15 0 0;
+    --sidebar-primary: 0.35 0 0;
+    --sidebar-primary-foreground: 0.98 0 0;
+    --sidebar-accent: 0.95 0 0;
+    --sidebar-accent-foreground: 0.25 0 0;
+    --sidebar-border: 0.9 0 0;
+    --sidebar-ring: 0.35 0 0;
+  }
+
+  .dark {
+    --background: 0.12 0 0;
+    --foreground: 0.95 0 0;
+    --card: 0.16 0 0;
+    --card-foreground: 0.95 0 0;
+    --popover: 0.2 0 0;
+    --popover-foreground: 0.95 0 0;
+
+    --primary: 0.65 0.22 280;
+    --primary-foreground: 0.12 0 0;
+
+    --secondary: 0.2 0 0;
+    --secondary-foreground: 0.88 0 0;
+    --muted: 0.22 0 0;
+    --muted-foreground: 0.55 0 0;
+
+    --accent: 0.65 0.22 280;
+    --accent-foreground: 0.12 0 0;
+
+    --destructive: 0.65 0.19 22;
+    --destructive-foreground: 0.12 0 0;
+
+    --border: 0.25 0.02 280;
+    --input: 0.25 0.02 280;
+    --ring: 0.65 0.22 280;
+
+    --chart-1: 0.49 0.24 264;
+    --chart-2: 0.7 0.17 162;
+    --chart-3: 0.77 0.19 70;
+    --chart-4: 0.63 0.27 304;
+    --chart-5: 0.65 0.25 16;
+
+    --sidebar: 0.18 0 0;
+    --sidebar-foreground: 0.95 0 0;
+    --sidebar-primary: 0.8 0 0;
+    --sidebar-primary-foreground: 0.145 0 0;
+    --sidebar-accent: 0.22 0 0;
+    --sidebar-accent-foreground: 0.85 0 0;
+    --sidebar-border: 0.28 0 0;
+    --sidebar-ring: 0.8 0 0;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+}
+
+@layer utilities {
+  @font-face {
+    font-family: "Space Grotesk";
+    src: url("/assets/fonts/SpaceGrotesk.woff2") format("woff2");
+    font-weight: 400 700;
+    font-display: swap;
+  }
+
+  @font-face {
+    font-family: "General Sans";
+    src: url("/assets/fonts/GeneralSans.woff2") format("woff2");
+    font-weight: 400 500 600 700;
+    font-display: swap;
+  }
+
+  @font-face {
+    font-family: "Geist Mono";
+    src: url("/assets/fonts/GeistMono.woff2") format("woff2");
+    font-weight: 400 500;
+    font-display: swap;
+  }
+  .transition-smooth {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  .chat-bubble-user {
+    @apply bg-accent text-accent-foreground rounded-2xl rounded-br-sm px-4 py-3 max-w-[75%] break-words shadow-md text-[15px] leading-relaxed;
+  }
+
+  .chat-bubble-ai {
+    @apply bg-muted text-foreground rounded-2xl rounded-bl-sm px-4 py-3 max-w-[75%] break-words shadow-sm text-[15px] leading-relaxed;
+  }
+
+  .score-display {
+    @apply text-5xl font-bold text-accent font-display tracking-tight;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes countUp {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes barGrow {
+  from {
+    width: 0%;
+  }
+}
+
+@keyframes chipMinimize {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.85) translateY(4px);
+  }
+}
