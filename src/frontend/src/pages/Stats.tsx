@@ -1,6 +1,7 @@
 import { createActor } from "@/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { usePlayerProgress } from "@/hooks/use-player-progress";
+import { appApi } from "@/lib/app-api";
 import {
   CHALLENGES,
   PLAYER_RANKS,
@@ -187,33 +188,44 @@ export default function Stats() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated || !actor) return;
+    if (!isAuthenticated) return;
     const token = localStorage.getItem("rizz_session_token");
     if (!token) return;
     setIsSyncing(true);
-    actor
-      .getCallerStats(token)
-      .then((backendStats) => {
-        if (!backendStats) return;
-        setBackendXP(Number(backendStats.totalXP));
-        setBackendRankId(backendStats.rankId);
-        // Convert backend session history entries to frontend shape
-        const mapped: SessionHistoryEntry[] = backendStats.sessionHistory.map(
-          (e, i) => ({
-            id: `backend-${i}-${String(e.playedAt)}`,
-            date: new Date(Number(e.playedAt)).toISOString(),
-            challengeId: e.challengeId,
-            challengeName: e.challengeId
-              .replace(/-/g, " ")
-              .replace(/\b\w/g, (c) => c.toUpperCase()),
-            score: Number(e.score),
-            outcome: e.outcome,
-            finalMood: e.finalMood,
-            finalInterest: 0,
-            xpEarned: 0,
-          }),
-        );
-        if (mapped.length > 0) setBackendHistory(mapped);
+    const load = actor
+      ? actor.getCallerStats(token).then((backendStats) => {
+          if (!backendStats) return null;
+          const mapped: SessionHistoryEntry[] = backendStats.sessionHistory.map(
+            (e, i) => ({
+              id: `backend-${i}-${String(e.playedAt)}`,
+              date: new Date(Number(e.playedAt)).toISOString(),
+              challengeId: e.challengeId,
+              challengeName: e.challengeId
+                .replace(/-/g, " ")
+                .replace(/\b\w/g, (c) => c.toUpperCase()),
+              score: Number(e.score),
+              outcome: e.outcome,
+              finalMood: e.finalMood,
+              finalInterest: 0,
+              xpEarned: 0,
+            }),
+          );
+          return {
+            totalXP: Number(backendStats.totalXP),
+            rankId: backendStats.rankId,
+            sessionHistory: mapped,
+          };
+        })
+      : appApi.getProgress(token).then((result) => result.progress);
+
+    load
+      .then((backendProgress) => {
+        if (!backendProgress) return;
+        setBackendXP(backendProgress.totalXP);
+        setBackendRankId(backendProgress.rankId);
+        if (backendProgress.sessionHistory.length > 0) {
+          setBackendHistory(backendProgress.sessionHistory);
+        }
       })
       .catch(() => {})
       .finally(() => setIsSyncing(false));

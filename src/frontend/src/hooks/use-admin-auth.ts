@@ -1,9 +1,10 @@
 /**
- * Separate admin authentication — completely isolated from player auth.
- * Uses localStorage key 'rizz_admin_session_token' (never 'rizz_session_token').
+ * Separate admin authentication, isolated from player auth.
+ * Uses localStorage key 'rizz_admin_session_token'.
  */
 import { createActor } from "@/backend";
 import type { PublicAdminProfile } from "@/backend";
+import { appApi, toFrontendAdmin } from "@/lib/app-api";
 import { useActor } from "@caffeineai/core-infrastructure";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -36,8 +37,6 @@ function clearAdminToken(): void {
   } catch {}
 }
 
-// Helper: wrap any IC call with a 5-second timeout so a slow/unreachable
-// canister never hangs the browser indefinitely.
 function withTimeout<T>(promise: Promise<T>, ms = 5000): Promise<T> {
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(
@@ -82,60 +81,58 @@ export function useAdminAuth(): AdminAuthState {
   const hasBootstrappedRef = useRef(false);
   const hasVerifiedRef = useRef(false);
 
-  // On mount: bootstrap admin account (safe to call every time — backend ignores if already exists),
-  // then validate any existing session token.
   useEffect(() => {
-    const token = loadAdminToken();
-    if (!actor && token?.startsWith("standalone-admin:")) {
-      setAdminToken(token);
-      setAdminProfile(createStandaloneProfile());
-      return;
-    }
-
-    if (!actor || isFetching || hasBootstrappedRef.current) return;
+    if (isFetching || hasBootstrappedRef.current) return;
     hasBootstrappedRef.current = true;
 
     (async () => {
-      // Step 1: ensure the default admin account exists.
-      // initAdmin returns #err(#usernameTaken) if it already exists — that's fine, just ignore it.
-      try {
-        await withTimeout(
-          actor.initAdmin("admin", "medes608@gmail.com", "RizzAdmin2024!#"),
-        );
-      } catch {
-        // ignore — admin may already exist, or canister was slow
+      if (actor) {
+        try {
+          await withTimeout(
+            actor.initAdmin(
+              STANDALONE_ADMIN.username,
+              STANDALONE_ADMIN.email,
+              STANDALONE_ADMIN.password,
+            ),
+          );
+        } catch {}
       }
 
-      // Step 2: validate any existing session token stored in localStorage.
       if (hasVerifiedRef.current) return;
+      const token = loadAdminToken();
       if (!token) return;
       hasVerifiedRef.current = true;
       setIsLoading(true);
-      if (token.startsWith("standalone-admin:") && !actor) {
-        setAdminToken(token);
-        setAdminProfile(createStandaloneProfile());
-        setIsLoading(false);
-        return;
-      }
+
       try {
-        const valid = await withTimeout(actor.isAdminToken(token));
-        if (!valid) {
-          clearAdminToken();
-          setAdminToken(null);
-          setAdminProfile(null);
-          return;
-        }
-        const profile = await withTimeout(actor.getAdminProfile(token));
-        if (profile) {
-          setAdminToken(token);
-          setAdminProfile(profile);
+        if (!actor) {
+          if (token.startsWith("standalone-admin:")) {
+            setAdminToken(token);
+            setAdminProfile(createStandaloneProfile());
+          } else {
+            const result = await appApi.adminMe(token);
+            setAdminToken(token);
+            setAdminProfile(toFrontendAdmin(result.profile));
+          }
         } else {
-          clearAdminToken();
-          setAdminToken(null);
-          setAdminProfile(null);
+          const valid = await withTimeout(actor.isAdminToken(token));
+          if (!valid) {
+            clearAdminToken();
+            setAdminToken(null);
+            setAdminProfile(null);
+            return;
+          }
+          const profile = await withTimeout(actor.getAdminProfile(token));
+          if (profile) {
+            setAdminToken(token);
+            setAdminProfile(profile);
+          } else {
+            clearAdminToken();
+            setAdminToken(null);
+            setAdminProfile(null);
+          }
         }
       } catch {
-        // Timeout or IC error — clear session so user can try again cleanly
         clearAdminToken();
         setAdminToken(null);
         setAdminProfile(null);
@@ -150,37 +147,44 @@ export function useAdminAuth(): AdminAuthState {
       identifier: string,
       password: string,
     ): Promise<{ error?: string }> => {
-      const normalized = identifier.trim().toLowerCase();
-      if (
-        !actor &&
-        (normalized === STANDALONE_ADMIN.username ||
-          normalized === STANDALONE_ADMIN.email) &&
-        password === STANDALONE_ADMIN.password
-      ) {
-        const token = `standalone-admin:${Date.now()}`;
-        const profile = createStandaloneProfile();
-        saveAdminToken(token);
-        setAdminToken(token);
-        setAdminProfile(profile);
-        return {};
-      }
-      if (!actor) {
-        return { error: "Invalid username or password." };
-      }
       setIsLoading(true);
+      const normalized = identifier.trim().toLowerCase();
       try {
+        if (!actor) {
+          try {
+            const result = await appApi.adminLogin(identifier.trim(), password);
+            const profile = toFrontendAdmin(result.profile);
+            saveAdminToken(result.token);
+            setAdminToken(result.token);
+            setAdminProfile(profile);
+            return {};
+          } catch {
+            if (
+              (normalized === STANDALONE_ADMIN.username ||
+                normalized === STANDALONE_ADMIN.email) &&
+              password === STANDALONE_ADMIN.password
+            ) {
+              const token = `standalone-admin:${Date.now()}`;
+              const profile = createStandaloneProfile();
+              saveAdminToken(token);
+              setAdminToken(token);
+              setAdminProfile(profile);
+              return {};
+            }
+            return { error: "Invalid username or password." };
+          }
+        }
+
         const result = await withTimeout(
           actor.adminLogin(identifier.trim(), password),
         );
         if (result.__kind__ === "ok") {
           const { token, profile } = result.ok;
           saveAdminToken(token);
-          // Update state synchronously so Admin.tsx re-renders immediately
           setAdminToken(token);
           setAdminProfile(profile);
           return {};
         }
-        const kind = result.err.__kind__;
         const msgMap: Record<string, string> = {
           wrongPassword: "Invalid username or password.",
           notFound: "Admin account not found. Please contact support.",
@@ -188,7 +192,10 @@ export function useAdminAuth(): AdminAuthState {
           unauthorized: "Not authorized.",
           invalidInput: "Invalid input provided.",
         };
-        return { error: msgMap[kind] ?? "Login failed. Please try again." };
+        return {
+          error:
+            msgMap[result.err.__kind__] ?? "Login failed. Please try again.",
+        };
       } catch {
         return { error: "Connection error. Please try again." };
       } finally {
@@ -207,6 +214,10 @@ export function useAdminAuth(): AdminAuthState {
     if (actor && token) {
       try {
         await withTimeout(actor.adminLogout(token));
+      } catch {}
+    } else if (token && !token.startsWith("standalone-admin:")) {
+      try {
+        await appApi.adminLogout(token);
       } catch {}
     }
   }, [actor]);

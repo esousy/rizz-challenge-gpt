@@ -4,6 +4,8 @@
  */
 import { createActor } from "@/backend";
 import type { PublicProfile } from "@/backend";
+import { appApi, toFrontendProfile } from "@/lib/app-api";
+import type { PlayerProgress, PlayerRankId } from "@/types";
 import { useActor } from "@caffeineai/core-infrastructure";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -102,13 +104,15 @@ export function useAuth(): AuthState {
   const hasVerifiedRef = useRef(false);
 
   useEffect(() => {
-    if (!actor || isFetching || hasVerifiedRef.current) return;
+    if (isFetching || hasVerifiedRef.current) return;
     const token = loadToken();
     if (!token) return;
     hasVerifiedRef.current = true;
     setIsLoading(true);
-    actor
-      .getCallerProfile(token)
+    const loadProfile = actor
+      ? actor.getCallerProfile(token)
+      : appApi.me(token).then((result) => toFrontendProfile(result.user));
+    loadProfile
       .then((profile) => {
         if (profile) {
           setUser(profile);
@@ -140,13 +144,34 @@ export function useAuth(): AuthState {
         const totalXP = parsed.totalXP ?? 0;
         const sessionHistory = parsed.sessionHistory ?? [];
         if (totalXP > 0 || sessionHistory.length > 0) {
-          await actor?.saveCallerProgress(
-            token,
-            parsed.rankId ?? "rookie",
-            BigInt(totalXP),
-            BigInt(parsed.streak ?? 0),
-            parsed.unlockedChallenges ?? [],
-          );
+          if (actor) {
+            await actor.saveCallerProgress(
+              token,
+              parsed.rankId ?? "rookie",
+              BigInt(totalXP),
+              BigInt(parsed.streak ?? 0),
+              parsed.unlockedChallenges ?? [],
+            );
+          } else {
+            const progress: PlayerProgress = {
+              totalXP,
+              rankId: (parsed.rankId ?? "rookie") as PlayerRankId,
+              skills: {
+                confidence: 10,
+                humor: 10,
+                originality: 10,
+                tension: 10,
+                socialAwareness: 10,
+              },
+              streak: parsed.streak ?? 0,
+              lastPlayedDate: null,
+              dailyChallengeCompletedDate: null,
+              completedChallenges: parsed.unlockedChallenges ?? [],
+              sessionHistory: [],
+              bestScores: {},
+            };
+            await appApi.saveProgress(token, progress);
+          }
         }
         // Clear guest data after merge
         localStorage.removeItem(GUEST_PROGRESS_KEY);
@@ -164,10 +189,19 @@ export function useAuth(): AuthState {
       identifier: string,
       password: string,
     ): Promise<{ error?: string }> => {
-      if (!actor) return { error: "Not ready. Please try again." };
       setIsLoading(true);
       setAuthError(null);
       try {
+        if (!actor) {
+          const result = await appApi.login(identifier.trim(), password);
+          const profile = toFrontendProfile(result.user);
+          saveToken(result.token);
+          saveUser(profile);
+          setUser(profile);
+          await mergeGuestProgress(result.token);
+          return {};
+        }
+
         const result = await actor.login(identifier.trim(), password);
         if (result.__kind__ === "ok") {
           const { token, profile } = result.ok;
@@ -203,10 +237,20 @@ export function useAuth(): AuthState {
       email: string,
       password: string,
     ): Promise<{ error?: string }> => {
-      if (!actor) return { error: "Not ready. Please try again." };
       setIsLoading(true);
       setAuthError(null);
       try {
+        if (!actor) {
+          await appApi.signup(username.trim(), email.trim(), password);
+          const loginResult = await appApi.login(email.trim(), password);
+          const profile = toFrontendProfile(loginResult.user);
+          saveToken(loginResult.token);
+          saveUser(profile);
+          setUser(profile);
+          await mergeGuestProgress(loginResult.token);
+          return {};
+        }
+
         const result = await actor.signup(
           username.trim(),
           email.trim(),
@@ -253,6 +297,11 @@ export function useAuth(): AuthState {
     clearToken();
     setUser(null);
     hasVerifiedRef.current = false;
+    if (token && !actor) {
+      try {
+        await appApi.logout(token);
+      } catch {}
+    }
     if (actor && token) {
       try {
         await actor.logout(token);
@@ -261,11 +310,12 @@ export function useAuth(): AuthState {
   }, [actor]);
 
   const refreshUser = useCallback(async () => {
-    if (!actor) return;
     try {
       const storedToken = loadToken();
       if (!storedToken) return;
-      const profile = await actor.getCallerProfile(storedToken);
+      const profile = actor
+        ? await actor.getCallerProfile(storedToken)
+        : toFrontendProfile((await appApi.me(storedToken)).user);
       if (profile) {
         setUser(profile);
         saveUser(profile);

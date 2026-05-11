@@ -7,6 +7,7 @@ import type { PublicProfile, Status } from "@/backend";
 import { AdminLoginForm } from "@/components/AdminLoginForm";
 import { Button } from "@/components/ui/button";
 import { useAdminAuth } from "@/hooks/use-admin-auth";
+import { appApi, toFrontendProfile } from "@/lib/app-api";
 import { useActor } from "@caffeineai/core-infrastructure";
 import {
   AlertTriangle,
@@ -180,13 +181,18 @@ function UsersTab({
   } | null>(null);
 
   const load = useCallback(async () => {
-    if (!actor || isFetching) return;
+    if (isFetching) return;
     setLoading(true);
     setError("");
     try {
-      const result = await actor.getAllUsers(adminToken);
-      if (result.__kind__ === "ok") setUsers(result.ok);
-      else setError("Failed to load users.");
+      if (actor) {
+        const result = await actor.getAllUsers(adminToken);
+        if (result.__kind__ === "ok") setUsers(result.ok);
+        else setError("Failed to load users.");
+      } else {
+        const result = await appApi.getUsers(adminToken);
+        setUsers(result.users.map(toFrontendProfile));
+      }
     } catch {
       setError("Connection error.");
     } finally {
@@ -199,10 +205,13 @@ function UsersTab({
   }, [load]);
 
   async function handleStatusChange(userId: string, newStatus: Status) {
-    if (!actor) return;
     setActionLoading(userId);
     try {
-      await actor.updateUserStatus(adminToken, userId, newStatus);
+      if (actor) {
+        await actor.updateUserStatus(adminToken, userId, newStatus);
+      } else {
+        await appApi.updateUser(adminToken, userId, { status: newStatus });
+      }
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, status: newStatus } : u)),
       );
@@ -213,15 +222,17 @@ function UsersTab({
   }
 
   async function handlePlanChange(userId: string, newPlan: string) {
-    if (!actor) return;
     setPlanLoading(userId);
     try {
-      const result = await actor.setUserPlan(adminToken, userId, newPlan);
-      if (result.__kind__ === "ok") {
-        setUsers((prev) =>
-          prev.map((u) => (u.id === userId ? { ...u, plan: newPlan } : u)),
-        );
+      if (actor) {
+        const result = await actor.setUserPlan(adminToken, userId, newPlan);
+        if (result.__kind__ !== "ok") return;
+      } else {
+        await appApi.updateUser(adminToken, userId, { plan: newPlan });
       }
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, plan: newPlan } : u)),
+      );
     } catch {
     } finally {
       setPlanLoading(null);
@@ -229,11 +240,14 @@ function UsersTab({
   }
 
   async function handleDelete(userId: string) {
-    if (!actor) return;
     setConfirm(null);
     setActionLoading(userId);
     try {
-      await actor.deleteUser(adminToken, userId);
+      if (actor) {
+        await actor.deleteUser(adminToken, userId);
+      } else {
+        await appApi.deleteUser(adminToken, userId);
+      }
       setUsers((prev) => prev.filter((u) => u.id !== userId));
     } catch {
     } finally {
@@ -552,14 +566,20 @@ function AISettingsTab({
   const keyRef = useRef<HTMLInputElement>(null);
 
   const loadSettings = useCallback(async () => {
-    if (!actor || isFetching) return;
+    if (isFetching) return;
     try {
-      const [mock, keyResult] = await Promise.all([
-        actor.getMockMode(),
-        actor.getOpenAIKeyStatus(),
-      ]);
-      setMockModeState(mock);
-      setKeyStatus(keyResult);
+      if (actor) {
+        const [mock, keyResult] = await Promise.all([
+          actor.getMockMode(),
+          actor.getOpenAIKeyStatus(),
+        ]);
+        setMockModeState(mock);
+        setKeyStatus(keyResult);
+      } else {
+        const result = await appApi.getSettings();
+        setMockModeState(result.settings.mockMode ?? false);
+        setKeyStatus(null);
+      }
     } catch {}
   }, [actor, isFetching]);
 
@@ -568,11 +588,15 @@ function AISettingsTab({
   }, [loadSettings]);
 
   async function handleToggleMock() {
-    if (!actor || mockMode === null) return;
+    if (mockMode === null) return;
     setMockLoading(true);
     try {
       const next = !mockMode;
-      await actor.setMockMode(adminToken, next);
+      if (actor) {
+        await actor.setMockMode(adminToken, next);
+      } else {
+        await appApi.saveSetting(adminToken, "mockMode", next);
+      }
       setMockModeState(next);
     } catch {
     } finally {
@@ -582,9 +606,17 @@ function AISettingsTab({
 
   async function handleSaveKey(e: React.FormEvent) {
     e.preventDefault();
-    if (!actor || !keyValue.trim()) return;
+    if (!keyValue.trim()) return;
     setKeyLoading(true);
     setKeyFeedback(null);
+    if (!actor) {
+      setKeyFeedback({
+        type: "error",
+        msg: "Set OPENAI_API_KEY in Vercel Project Settings -> Environment Variables, then redeploy.",
+      });
+      setKeyLoading(false);
+      return;
+    }
     try {
       const result = await actor.setOpenAIKey(adminToken, keyValue.trim());
       if (result.__kind__ === "ok") {
@@ -811,10 +843,16 @@ function AppSettingsTab({
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
-    if (!actor || isFetching) return;
+    if (isFetching) return;
     setLoading(true);
     try {
-      const cfg = await actor.getFreePlanConfig();
+      const cfg = actor
+        ? await actor.getFreePlanConfig()
+        : ((await appApi.getSettings()).settings.freePlanConfig ?? {
+            rankedSessionsPerDay: 3,
+            rizzAssistPerSession: 1,
+            hintsPerSession: 3,
+          });
       const parsed = {
         rankedSessionsPerDay: Number(cfg.rankedSessionsPerDay),
         rizzAssistPerSession: Number(cfg.rizzAssistPerSession),
@@ -835,24 +873,28 @@ function AppSettingsTab({
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!actor || !draft) return;
+    if (!draft) return;
     setSaving(true);
     setFeedback(null);
     try {
-      const result = await actor.setFreePlanConfig(adminToken, {
-        rankedSessionsPerDay: BigInt(draft.rankedSessionsPerDay),
-        rizzAssistPerSession: BigInt(draft.rizzAssistPerSession),
-        hintsPerSession: BigInt(draft.hintsPerSession),
-      });
-      if (result.__kind__ === "ok") {
-        setConfig({ ...draft });
-        setFeedback({ type: "success", msg: "Free Plan settings saved." });
-      } else {
-        setFeedback({
-          type: "error",
-          msg: "Failed to save. Check admin session.",
+      if (actor) {
+        const result = await actor.setFreePlanConfig(adminToken, {
+          rankedSessionsPerDay: BigInt(draft.rankedSessionsPerDay),
+          rizzAssistPerSession: BigInt(draft.rizzAssistPerSession),
+          hintsPerSession: BigInt(draft.hintsPerSession),
         });
+        if (result.__kind__ !== "ok") {
+          setFeedback({
+            type: "error",
+            msg: "Failed to save. Check admin session.",
+          });
+          return;
+        }
+      } else {
+        await appApi.saveSetting(adminToken, "freePlanConfig", draft);
       }
+      setConfig({ ...draft });
+      setFeedback({ type: "success", msg: "Free Plan settings saved." });
     } catch {
       setFeedback({ type: "error", msg: "Connection error." });
     } finally {
@@ -1050,49 +1092,6 @@ function ComingSoonTab({
 
 // ── Main Admin Page ────────────────────────────────────────────────────────────
 
-function StandaloneBackendNotice({ tab }: { tab: AdminTab }) {
-  const copy =
-    tab === "ai-settings"
-      ? {
-          title: "AI settings are configured in Vercel",
-          body: "This standalone deployment does not have a Caffeine/ICP backend canister, so the admin panel cannot store an API key in-app. Add OPENAI_API_KEY in Vercel Project Settings -> Environment Variables, then redeploy.",
-        }
-      : tab === "app-settings"
-        ? {
-            title: "Free plan limits are using app defaults",
-            body: "Ranked session, hint, and assist limits are enforced client-side with the current defaults. In-app editing requires a deployed backend canister.",
-          }
-        : {
-            title: "No backend datastore connected",
-            body: "User management requires the Caffeine/ICP backend canister. The Vercel-only deployment can run the game and Live AI proxy, but it cannot list or manage backend users.",
-          };
-
-  return (
-    <div className="max-w-xl bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col gap-4">
-      <div className="flex items-start gap-3">
-        <AlertTriangle
-          size={18}
-          className="text-amber-400 flex-shrink-0 mt-0.5"
-        />
-        <div>
-          <p className="text-sm font-semibold text-white">{copy.title}</p>
-          <p className="text-sm text-zinc-400 mt-1 leading-relaxed">
-            {copy.body}
-          </p>
-        </div>
-      </div>
-      <div className="rounded-xl bg-zinc-950 border border-zinc-800 px-4 py-3">
-        <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
-          Required production env
-        </p>
-        <code className="block mt-2 text-sm text-emerald-400">
-          OPENAI_API_KEY
-        </code>
-      </div>
-    </div>
-  );
-}
-
 export default function Admin() {
   const { actor, isFetching } = useActor(createActor);
   const {
@@ -1280,14 +1279,14 @@ export default function Admin() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2 }}
           >
-            {activeTab === "users" && actor && (
+            {activeTab === "users" && (
               <UsersTab
                 adminToken={adminToken!}
                 actor={actor}
                 isFetching={isFetching}
               />
             )}
-            {activeTab === "ai-settings" && actor && (
+            {activeTab === "ai-settings" && (
               <AISettingsTab
                 adminToken={adminToken!}
                 actor={actor}
@@ -1303,17 +1302,13 @@ export default function Admin() {
             {activeTab === "payments" && (
               <ComingSoonTab label="Payments" icon={<CreditCard size={22} />} />
             )}
-            {activeTab === "app-settings" && actor && (
+            {activeTab === "app-settings" && (
               <AppSettingsTab
                 adminToken={adminToken!}
                 actor={actor}
                 isFetching={isFetching}
               />
             )}
-            {(activeTab === "users" ||
-              activeTab === "ai-settings" ||
-              activeTab === "app-settings") &&
-              !actor && <StandaloneBackendNotice tab={activeTab} />}
           </motion.div>
         </main>
       </div>

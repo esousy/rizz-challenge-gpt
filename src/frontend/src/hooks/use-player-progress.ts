@@ -1,4 +1,5 @@
 import type { SessionResult as BackendSessionResult } from "@/backend";
+import { appApi } from "@/lib/app-api";
 import { getDailyChallenge, getRankForXP } from "@/lib/challenges";
 import type {
   BestScores,
@@ -396,6 +397,19 @@ export function usePlayerProgress() {
         actor.saveCallerSession(token, backendSession).catch(() => {
           // Non-critical — localStorage is the fallback
         });
+      } else if (token) {
+        appApi.saveProgress(token, updatedProgress).catch(() => {
+          // Non-critical — localStorage is the fallback
+        });
+        appApi
+          .saveSession(token, {
+            ...sessionEntry,
+            characterName: backendSession?.characterName,
+            metadata: { isDailyBonus, skillsDelta: skillDeltas },
+          })
+          .catch(() => {
+            // Non-critical — localStorage is the fallback
+          });
       }
 
       return updatedProgress;
