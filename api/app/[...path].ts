@@ -207,7 +207,11 @@ async function requireAdmin(token?: string) {
 }
 
 async function route(req: any, res: any) {
-  const parts = Array.isArray(req.query.path) ? req.query.path : [];
+  const parts = Array.isArray(req.query.path)
+    ? req.query.path
+    : typeof req.query.path === "string"
+      ? [req.query.path]
+      : [];
   const path = `/${parts.join("/")}`;
 
   if (req.method === "GET" && path === "/health") {
