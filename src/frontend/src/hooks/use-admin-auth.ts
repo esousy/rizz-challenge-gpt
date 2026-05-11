@@ -78,7 +78,7 @@ export function useAdminAuth(): AdminAuthState {
       // initAdmin returns #err(#usernameTaken) if it already exists — that's fine, just ignore it.
       try {
         await withTimeout(
-          actor.initAdmin("admin", "mesousy@gmail.com", "RizzAdmin2024!#"),
+          actor.initAdmin("admin", "medes608@gmail.com", "RizzAdmin2024!#"),
         );
       } catch {
         // ignore — admin may already exist, or canister was slow
