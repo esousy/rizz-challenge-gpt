@@ -26,18 +26,28 @@ const ALL_CHALLENGE_IDS = [
 ];
 
 function getDatabaseUrl(): string {
-  const url =
-    process.env.DATABASE_URL ||
-    process.env.POSTGRES_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.NEON_DATABASE_URL;
+  const url = getOptionalDatabaseUrl();
   if (!url) {
     throw new Error("DATABASE_URL is not configured.");
   }
   return url;
 }
 
-const sql = neon(getDatabaseUrl());
+function getOptionalDatabaseUrl(): string | undefined {
+  const url =
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.NEON_DATABASE_URL;
+  return url;
+}
+
+let sqlClient: ReturnType<typeof neon> | null = null;
+
+function sql(strings: TemplateStringsArray, ...values: unknown[]) {
+  if (!sqlClient) sqlClient = neon(getDatabaseUrl());
+  return (sqlClient as any)(strings, ...values);
+}
 
 function hashPassword(password: string, salt = randomBytes(16).toString("hex")) {
   const hash = pbkdf2Sync(password, salt, 120000, 32, "sha256").toString("hex");
@@ -197,13 +207,17 @@ async function requireAdmin(token?: string) {
 }
 
 async function route(req: any, res: any) {
-  await initDb();
   const parts = Array.isArray(req.query.path) ? req.query.path : [];
   const path = `/${parts.join("/")}`;
 
   if (req.method === "GET" && path === "/health") {
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({
+      ok: true,
+      databaseConfigured: Boolean(getOptionalDatabaseUrl()),
+    });
   }
+
+  await initDb();
 
   if (req.method === "POST" && path === "/auth/signup") {
     const { username, email, password } = req.body ?? {};
