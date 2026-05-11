@@ -16,6 +16,47 @@ import {
   parseOpenAIJSON,
 } from "../../../lib/server/openai-helpers.js";
 import { getOpenAIKey } from "../../server/get-openai-key.js";
+import { neon } from "@neondatabase/serverless";
+
+// ── AI Usage Logger (writes directly to Neon DB) ──────────────────────────
+const OPENAI_MODEL_PRICING: Record<string, { inputPer1MTokens: number; outputPer1MTokens: number }> = {
+  "gpt-4o-mini": { inputPer1MTokens: 0.15, outputPer1MTokens: 0.60 },
+  "gpt-4.1-mini": { inputPer1MTokens: 0.40, outputPer1MTokens: 1.60 },
+  "gpt-4.1": { inputPer1MTokens: 2.00, outputPer1MTokens: 8.00 },
+};
+
+function estimateCostUsd(model: string, promptTokens: number, completionTokens: number): number {
+  const pricing = OPENAI_MODEL_PRICING[model] ?? OPENAI_MODEL_PRICING["gpt-4o-mini"];
+  const inputCost = (promptTokens / 1_000_000) * pricing.inputPer1MTokens;
+  const outputCost = (completionTokens / 1_000_000) * pricing.outputPer1MTokens;
+  return Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000;
+}
+
+function getDbUrl(): string | undefined {
+  return process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL || process.env.NEON_DATABASE_URL;
+}
+
+function logAiUsageFireAndForget(params: {
+  requestType: string;
+  promptTokens: number;
+  completionTokens: number;
+  success: boolean;
+  errorMessage?: string;
+  challengeId?: string;
+  userCategory?: string;
+  model?: string;
+}) {
+  const dbUrl = getDbUrl();
+  if (!dbUrl) return; // Silently skip if no DB configured
+  const model = params.model ?? "gpt-4o-mini";
+  const totalTokens = params.promptTokens + params.completionTokens;
+  const estimatedCostUsd = estimateCostUsd(model, params.promptTokens, params.completionTokens);
+  const sql = neon(dbUrl);
+  sql`
+    INSERT INTO ai_usage_logs (user_category, request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, success, error_message)
+    VALUES (${params.userCategory ?? 'anonymous'}, ${params.requestType}, ${model}, ${params.promptTokens}, ${params.completionTokens}, ${totalTokens}, ${estimatedCostUsd}, ${params.success}, ${params.errorMessage ?? null})
+  `.catch((err: unknown) => console.error("[logAiUsage] Failed:", err));
+}
 
 export interface ChatProxyBody {
   challenge_type: string;
@@ -49,7 +90,7 @@ export interface ChatProxyResponse {
 async function callOpenAI(
   apiKey: string,
   messages: { role: string; content: string }[],
-): Promise<{ ok: boolean; content: string; error?: string }> {
+): Promise<{ ok: boolean; content: string; error?: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }> {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -78,16 +119,22 @@ async function callOpenAI(
           : res.status === 429
             ? "Rate limit reached"
             : `OpenAI error (${res.status})`;
+    // Log failed call
+    logAiUsageFireAndForget({ requestType: "normal_chat", promptTokens: 0, completionTokens: 0, success: false, errorMessage: msg });
     return { ok: false, content: "", error: msg };
   }
 
   const choices = data?.choices as Array<Record<string, unknown>> | undefined;
-  const content = (choices?.[0]?.message as Record<string, unknown> | undefined)
-    ?.content;
+  const content = (choices?.[0]?.message as Record<string, unknown> | undefined)?.content;
   const text = typeof content === "string" ? content : "";
-  if (!text)
+  const usage = data?.usage as { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
+  if (!text) {
+    logAiUsageFireAndForget({ requestType: "normal_chat", promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0, success: false, errorMessage: "Empty response from OpenAI" });
     return { ok: false, content: "", error: "Empty response from OpenAI" };
-  return { ok: true, content: text };
+  }
+  // Log successful call
+  logAiUsageFireAndForget({ requestType: "normal_chat", promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0, success: true });
+  return { ok: true, content: text, usage };
 }
 
 export async function handleChatProxy(

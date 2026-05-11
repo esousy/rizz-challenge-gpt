@@ -15,6 +15,71 @@ const DEFAULT_FREE_PLAN = {
   hintsPerSession: 3,
 };
 
+// ── Tier Limit Defaults ────────────────────────────────────────────────────
+const DEFAULT_TIER_LIMITS: Record<string, {
+  rankedSessionsPerDay: number | null;
+  hintsPerDay: number | null;
+  assistsPerDay: number | null;
+}> = {
+  anonymous: { rankedSessionsPerDay: 1, hintsPerDay: 3, assistsPerDay: 0 },
+  free: { rankedSessionsPerDay: 3, hintsPerDay: 10, assistsPerDay: 1 },
+  pro: { rankedSessionsPerDay: null, hintsPerDay: null, assistsPerDay: null },
+  admin: { rankedSessionsPerDay: null, hintsPerDay: null, assistsPerDay: null },
+};
+
+function getUserTier(user: any): string {
+  if (!user) return "anonymous";
+  if (user.username === DEFAULT_ADMIN.username) return "admin";
+  if (user.plan === "pro") return "pro";
+  return "free";
+}
+
+async function getTierLimits(): Promise<Record<string, { rankedSessionsPerDay: number | null; hintsPerDay: number | null; assistsPerDay: number | null }>> {
+  try {
+    const rows = await sql`SELECT key, value FROM app_settings WHERE key LIKE 'tierLimits%'`;
+    if (rows.length === 0) return DEFAULT_TIER_LIMITS;
+    const result: Record<string, any> = {};
+    for (const row of rows) {
+      const tier = row.key.replace('tierLimits_', '');
+      result[tier] = row.value;
+    }
+    // Merge with defaults for missing tiers
+    for (const tier of Object.keys(DEFAULT_TIER_LIMITS)) {
+      if (!result[tier]) result[tier] = DEFAULT_TIER_LIMITS[tier];
+    }
+    return result as Record<string, { rankedSessionsPerDay: number | null; hintsPerDay: number | null; assistsPerDay: number | null }>;
+  } catch {
+    return DEFAULT_TIER_LIMITS;
+  }
+}
+
+async function getTodayUsage(userId: string | null, anonymousId: string | null): Promise<{ ranked_sessions_used: number; hints_used: number; assists_used: number }> {
+  const today = new Date().toISOString().split('T')[0];
+  if (userId) {
+    const rows = await sql`SELECT ranked_sessions_used, hints_used, assists_used FROM user_daily_usage WHERE user_id = ${userId} AND usage_date = ${today}`;
+    return rows[0] ?? { ranked_sessions_used: 0, hints_used: 0, assists_used:0 };
+  }
+  if (anonymousId) {
+    const rows = await sql`SELECT ranked_sessions_used, hints_used, assists_used FROM user_daily_usage WHERE anonymous_id = ${anonymousId} AND usage_date = ${today}`;
+    return rows[0] ?? { ranked_sessions_used: 0, hints_used: 0, assists_used: 0 };
+  }
+  return { ranked_sessions_used: 0, hints_used: 0, assists_used: 0 };
+}
+
+function canUse(feature: 'rankedSessions' | 'hints' | 'assists', usage: { ranked_sessions_used: number; hints_used: number; assists_used: number }, limits: { rankedSessionsPerDay: number | null; hintsPerDay: number | null; assistsPerDay: null }): boolean {
+  const limitMap = { rankedSessions: 'rankedSessionsPerDay', hints: 'hintsPerDay', assists: 'assistsPerDay' } as const;
+  const usageMap = { rankedSessions: 'ranked_sessions_used', hints: 'hints_used', assists: 'assists_used' } as const;
+  const limit = limits[limitMap[feature]];
+  if (limit === null) return true; // unlimited
+  return usage[usageMap[feature]] < limit;
+}
+
+const LIMIT_FEATURE_KEY: Record<string, 'rankedSessions' | 'hints' | 'assists'> = {
+  ranked_session: 'rankedSessions',
+  hint: 'hints',
+  assist: 'assists',
+};
+
 const ALL_CHALLENGE_IDS = [
   "easy-flirt",
   "dry-texter",
@@ -24,6 +89,47 @@ const ALL_CHALLENGE_IDS = [
   "recover-fumble",
   "re-engage-ghosted",
 ];
+
+// ── OpenAI Cost Estimation ───────────────────────────────────────────────────
+
+const OPENAI_MODEL_PRICING: Record<string, { inputPer1MTokens: number; outputPer1MTokens: number }> = {
+  "gpt-4o-mini": { inputPer1MTokens: 0.15, outputPer1MTokens: 0.60 },
+  "gpt-4.1-mini": { inputPer1MTokens: 0.40, outputPer1MTokens: 1.60 },
+  "gpt-4.1": { inputPer1MTokens: 2.00, outputPer1MTokens: 8.00 },
+};
+
+function estimateCostUsd(model: string, promptTokens: number, completionTokens: number): number {
+  const pricing = OPENAI_MODEL_PRICING[model] ?? OPENAI_MODEL_PRICING["gpt-4o-mini"];
+  const inputCost = (promptTokens / 1_000_000) * pricing.inputPer1MTokens;
+  const outputCost = (completionTokens / 1_000_000) * pricing.outputPer1MTokens;
+  return Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000;
+}
+
+async function logAiUsage(params: {
+  userId?: string | null;
+  userCategory: string;
+  sessionId?: string | null;
+  requestType: string;
+  challengeId?: string | null;
+  challengeName?: string | null;
+  characterName?: string | null;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  success: boolean;
+  errorMessage?: string | null;
+}) {
+  const totalTokens = params.promptTokens + params.completionTokens;
+  const estimatedCostUsd = estimateCostUsd(params.model, params.promptTokens, params.completionTokens);
+  try {
+    await sql`
+      INSERT INTO ai_usage_logs (user_id, user_category, session_id, request_type, challenge_id, challenge_name, character_name, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, success, error_message)
+      VALUES (${params.userId ?? null}, ${params.userCategory}, ${params.sessionId ?? null}, ${params.requestType}, ${params.challengeId ?? null}, ${params.challengeName ?? null}, ${params.characterName ?? null}, ${params.model}, ${params.promptTokens}, ${params.completionTokens}, ${totalTokens}, ${estimatedCostUsd}, ${params.success}, ${params.errorMessage ?? null})
+    `;
+  } catch (err) {
+    console.error("[logAiUsage] Failed to log AI usage:", err);
+  }
+}
 
 function getDatabaseUrl(): string {
   const url = getOptionalDatabaseUrl();
@@ -80,7 +186,11 @@ function publicUser(row: any) {
     totalXp: Number(row.total_xp ?? 0),
     streak: Number(row.streak ?? 0),
     createdAt: row.created_at,
+    lastActiveAt: row.last_active_at,
     unlockedChallenges: row.unlocked_challenges ?? [],
+    subscriptionStatus: row.subscription_status ?? 'inactive',
+    monthlyRevenueUsd: Number(row.monthly_revenue_usd ?? 0),
+    lifetimeRevenueUsd: Number(row.lifetime_revenue_usd ?? 0),
   };
 }
 
@@ -176,6 +286,74 @@ async function initDb() {
     values (${DEFAULT_ADMIN.username}, ${DEFAULT_ADMIN.email}, ${hashPassword(DEFAULT_ADMIN.password)})
     on conflict (username) do nothing
   `;
+
+  // ── AI Usage Logs table ──────────────────────────────────────────────────
+  await sql`
+    create table if not exists ai_usage_logs (
+      id uuid primary key default gen_random_uuid(),
+      user_id uuid references users(id) on delete set null,
+      user_category text not null default 'anonymous',
+      session_id uuid,
+      request_type text not null,
+      challenge_id text,
+      challenge_name text,
+      character_name text,
+      model text not null default 'gpt-4o-mini',
+      prompt_tokens integer not null default 0,
+      completion_tokens integer not null default 0,
+      total_tokens integer not null default 0,
+      estimated_cost_usd numeric(10,6) not null default 0,
+      success boolean not null default true,
+      error_message text,
+      created_at timestamptz not null default now()
+    )
+  `;
+  await sql`create index if not exists idx_ai_usage_logs_user_id on ai_usage_logs(user_id)`;
+  await sql`create index if not exists idx_ai_usage_logs_created_at on ai_usage_logs(created_at)`;
+  await sql`create index if not exists idx_ai_usage_logs_request_type on ai_usage_logs(request_type)`;
+  await sql`create index if not exists idx_ai_usage_logs_user_category on ai_usage_logs(user_category)`;
+
+  // ── Add subscription/revenue columns to users ───────────────────────────
+  await sql`alter table users add column if not exists subscription_status text default 'inactive'`;
+  await sql`alter table users add column if not exists current_period_start timestamptz`;
+  await sql`alter table users add column if not exists current_period_end timestamptz`;
+  await sql`alter table users add column if not exists monthly_revenue_usd numeric(10,2) default 0`;
+  await sql`alter table users add column if not exists lifetime_revenue_usd numeric(10,2) default 0`;
+  await sql`alter table users add column if not exists last_active_at timestamptz`;
+
+  // ── Daily usage tracking table ─────────────────────────────────────────
+  await sql`
+    create table if not exists user_daily_usage (
+      id uuid primary key default gen_random_uuid(),
+      identity_key text,
+      user_id uuid references users(id) on delete cascade,
+      anonymous_id text,
+      user_tier text not null default 'anonymous',
+      usage_date date not null default current_date,
+      ranked_sessions_used integer not null default 0,
+      hints_used integer not null default 0,
+      assists_used integer not null default 0,
+      normal_chat_calls integer not null default 0,
+      ai_calls integer not null default 0,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `;
+  // Add identity_key column for simple unique constraint
+  await sql`ALTER TABLE user_daily_usage ADD COLUMN IF NOT EXISTS identity_key TEXT`;
+  try { await sql`UPDATE user_daily_usage SET identity_key = CASE WHEN user_id IS NOT NULL THEN 'u:' || user_id::text WHEN anonymous_id IS NOT NULL THEN 'a:' || anonymous_id ELSE 'unknown' END WHERE identity_key IS NULL`; } catch {}
+  try { await sql`DROP INDEX IF EXISTS idx_daily_usage_identity`; } catch {}
+  try { await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_usage_identity ON user_daily_usage (identity_key, usage_date)`; } catch {}
+
+  // ── Seed tier limit settings ────────────────────────────────────────────
+  for (const [tier, limits] of Object.entries(DEFAULT_TIER_LIMITS)) {
+    const key = `tierLimits_${tier}`;
+    await sql`
+      insert into app_settings (key, value)
+      values (${key}, ${JSON.stringify(limits)}::jsonb)
+      on conflict (key) do nothing
+    `;
+  }
 }
 
 async function requireUser(token?: string) {
@@ -369,6 +547,20 @@ async function route(req: any, res: any) {
     return res.status(200).json({ ok: true });
   }
 
+  if (req.method === "GET" && path === "/sessions/today") {
+    const user = await requireUser(String(req.query.token ?? ""));
+    if (!user) return error(res, 401, "Unauthorized.");
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const rows = await sql`
+      select count(*)::int as count
+      from chat_sessions
+      where user_id = ${user.id}
+        and created_at >= ${todayStart.toISOString()}
+    `;
+    return res.status(200).json({ rankedSessionsUsed: rows[0]?.count ?? 0, user: publicUser(user) });
+  }
+
   if (req.method === "POST" && path === "/sessions") {
     const token = String(req.body?.token ?? "");
     const user = token ? await requireUser(token) : null;
@@ -387,6 +579,230 @@ async function route(req: any, res: any) {
         ${JSON.stringify(session.metadata ?? {})}::jsonb
       )
     `;
+    return res.status(200).json({ ok: true });
+  }
+
+  // ── Admin: Dashboard Analytics ────────────────────────────────────────────
+  if (req.method === "GET" && path === "/admin/dashboard") {
+    const admin = await requireAdmin(String(req.query.token ?? ""));
+    if (!admin) return error(res, 401, "Unauthorized.");
+
+    const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
+    const weekAgo = new Date(todayStart); weekAgo.setDate(weekAgo.getDate() - 7);
+    const monthAgo = new Date(todayStart); monthAgo.setDate(monthAgo.getDate() - 30);
+
+    async function getMetrics(since: Date) {
+      const sinceISO = since.toISOString();
+      const [newUsers, activeUsers, rankedSessions, aiStats, categoryStats, featureStats, proRevenue] = await Promise.all([
+        sql`SELECT count(*)::int as count FROM users WHERE created_at >= ${sinceISO}`,
+        sql`SELECT count(DISTINCT user_id)::int as count FROM ai_usage_logs WHERE created_at >= ${sinceISO} AND user_id IS NOT NULL`,
+        sql`SELECT count(*)::int as count FROM chat_sessions WHERE created_at >= ${sinceISO}`,
+        sql`SELECT count(*)::int as calls, coalesce(sum(total_tokens),0)::bigint as tokens, coalesce(sum(estimated_cost_usd),0)::numeric as cost FROM ai_usage_logs WHERE created_at >= ${sinceISO}`,
+        sql`SELECT user_category, count(*)::int as calls, coalesce(sum(total_tokens),0)::bigint as tokens, coalesce(sum(estimated_cost_usd),0)::numeric as cost FROM ai_usage_logs WHERE created_at >= ${sinceISO} GROUP BY user_category`,
+        sql`SELECT request_type, count(*)::int as calls, coalesce(sum(estimated_cost_usd),0)::numeric as cost FROM ai_usage_logs WHERE created_at >= ${sinceISO} GROUP BY request_type`,
+        sql`SELECT coalesce(sum(monthly_revenue_usd),0)::numeric as revenue FROM users WHERE plan = 'pro'`,
+      ]);
+      const totalCost = Number(aiStats[0]?.cost ?? 0);
+      const totalRevenue = Number(proRevenue[0]?.revenue ?? 0);
+      return {
+        newUsers: newUsers[0]?.count ?? 0,
+        activeUsers: activeUsers[0]?.count ?? 0,
+        rankedSessions: rankedSessions[0]?.count ?? 0,
+        aiCalls: aiStats[0]?.calls ?? 0,
+        totalTokens: Number(aiStats[0]?.tokens ?? 0),
+        estimatedCost: totalCost,
+        estimatedRevenue: totalRevenue,
+        estimatedProfit: Math.round((totalRevenue - totalCost) * 100) / 100,
+        byCategory: Object.fromEntries(categoryStats.map((r: any) => [r.user_category, { calls: r.calls, tokens: Number(r.tokens), cost: Number(r.cost) }])),
+        byFeature: Object.fromEntries(featureStats.map((r: any) => [r.request_type, { calls: r.calls, cost: Number(r.cost) }])),
+      };
+    }
+
+    return res.status(200).json({
+      today: await getMetrics(todayStart),
+      last7Days: await getMetrics(weekAgo),
+      last30Days: await getMetrics(monthAgo),
+    });
+  }
+
+  // ── Admin: User Detail Usage ──────────────────────────────────────────────
+  if (req.method === "GET" && path.startsWith("/admin/users/") && path.endsWith("/usage")) {
+    const admin = await requireAdmin(String(req.query.token ?? ""));
+    if (!admin) return error(res, 401, "Unauthorized.");
+    const userId = path.split("/")[3];
+    const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
+
+    const [user, sessions, aiUsage, todaySessions, todayHints, todayAssists, todayChat, sessionHistory, recentAi] = await Promise.all([
+      sql`SELECT * FROM users WHERE id = ${userId}`,
+      sql`SELECT count(*)::int as count FROM chat_sessions WHERE user_id = ${userId}`,
+      sql`SELECT count(*)::int as calls, coalesce(sum(total_tokens),0)::bigint as tokens, coalesce(sum(estimated_cost_usd),0)::numeric as cost FROM ai_usage_logs WHERE user_id = ${userId}`,
+      sql`SELECT count(*)::int as count FROM chat_sessions WHERE user_id = ${userId} AND created_at >= ${todayStart.toISOString()}`,
+      sql`SELECT count(*)::int as count FROM ai_usage_logs WHERE user_id = ${userId} AND request_type = 'hint' AND created_at >= ${todayStart.toISOString()}`,
+      sql`SELECT count(*)::int as count FROM ai_usage_logs WHERE user_id = ${userId} AND request_type = 'assist' AND created_at >= ${todayStart.toISOString()}`,
+      sql`SELECT count(*)::int as count FROM ai_usage_logs WHERE user_id = ${userId} AND request_type = 'normal_chat' AND created_at >= ${todayStart.toISOString()}`,
+      sql`SELECT id, challenge_id, character_name, score, final_interest, final_mood, outcome, xp_earned, created_at FROM chat_sessions WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT 50`,
+      sql`SELECT request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, success, error_message, created_at FROM ai_usage_logs WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT 50`,
+    ]);
+
+    if (!user[0]) return error(res, 404, "User not found.");
+
+    const totalHints = (await sql`SELECT count(*)::int as count FROM ai_usage_logs WHERE user_id = ${userId} AND request_type = 'hint'`)[0]?.count ?? 0;
+    const totalAssists = (await sql`SELECT count(*)::int as count FROM ai_usage_logs WHERE user_id = ${userId} AND request_type = 'assist'`)[0]?.count ?? 0;
+    const estCost = Number(aiUsage[0]?.cost ?? 0);
+    const estRevenue = Number(user[0].monthly_revenue_usd ?? 0);
+
+    return res.status(200).json({
+      user: publicUser(user[0]),
+      usage: {
+        totalRankedSessions: sessions[0]?.count ?? 0,
+        rankedSessionsToday: todaySessions[0]?.count ?? 0,
+        hintsToday: todayHints[0]?.count ?? 0,
+        totalHints,
+        assistsToday: todayAssists[0]?.count ?? 0,
+        totalAssists,
+        chatCallsToday: todayChat[0]?.count ?? 0,
+        totalAiCalls: aiUsage[0]?.calls ?? 0,
+        totalTokens: Number(aiUsage[0]?.tokens ?? 0),
+        estimatedCost: estCost,
+        estimatedRevenue: estRevenue,
+        estimatedProfit: Math.round((estRevenue - estCost) * 100) / 100,
+      },
+      sessionHistory,
+      recentAi,
+    });
+  }
+
+  // ── Admin: AI Errors ──────────────────────────────────────────────────────
+  if (req.method === "GET" && path === "/admin/ai-errors") {
+    const admin = await requireAdmin(String(req.query.token ?? ""));
+    if (!admin) return error(res, 401, "Unauthorized.");
+    const limit = Math.min(Number(req.query.limit ?? 50), 200);
+    const errors = await sql`
+      SELECT l.id, l.user_id, l.request_type, l.model, l.error_message, l.created_at, u.username
+      FROM ai_usage_logs l
+      LEFT JOIN users u ON u.id = l.user_id
+      WHERE l.success = false
+      ORDER BY l.created_at DESC
+      LIMIT ${limit}
+    `;
+    return res.status(200).json({ errors });
+  }
+
+  // ── Check Limit ──────────────────────────────────────────────────────────
+  if (req.method === "POST" && path === "/check-limit") {
+    const { feature, anonymousId } = req.body ?? {};
+    const validFeatures = ["ranked_session", "hint", "assist"];
+    if (!validFeatures.includes(feature)) return error(res, 400, "Invalid feature.");
+
+    const user = await requireUser(String(req.body?.token ?? ""));
+    const tier = getUserTier(user);
+    const allLimits = await getTierLimits();
+    const limits = allLimits[tier] ?? allLimits.free;
+    const usage = await getTodayUsage(user?.id ?? null, !user ? String(anonymousId ?? "") : null);
+    const feat = LIMIT_FEATURE_KEY[feature];
+    const limitKey = { rankedSessions: "rankedSessionsPerDay", hints: "hintsPerDay", assists: "assistsPerDay" }[feat];
+    const limit = limits[limitKey as keyof typeof limits];
+    const usageKey = { rankedSessions: "ranked_sessions_used", hints: "hints_used", assists: "assists_used" }[feat];
+    const used = usage[usageKey as keyof typeof usage];
+    const allowed = limit === null ? true : used < limit;
+    const tomorrow = new Date(); tomorrow.setUTCHours(24, 0, 0, 0);
+
+    return res.status(200).json({
+      allowed,
+      reason: allowed ? null : "limit_reached",
+      feature,
+      tier,
+      used,
+      limit,
+      resetAt: tomorrow.toISOString(),
+      upgradeRecommended: tier === "anonymous" || tier === "free",
+    });
+  }
+
+  // ── Increment Usage ───────────────────────────────────────────────────────
+  if (req.method === "POST" && path === "/increment-usage") {
+    const { feature, anonymousId } = req.body ?? {};
+    const validFeatures = ["ranked_session", "hint", "assist", "normal_chat", "ai_call"];
+    if (!validFeatures.includes(feature)) return error(res, 400, "Invalid feature.");
+
+    const user = await requireUser(String(req.body?.token ?? ""));
+    const tier = getUserTier(user);
+    const today = new Date().toISOString().split("T")[0];
+
+    // Explicit SQL for each feature x identity type combination
+    // (Neon tagged-template sql\`...\` doesn't support dynamic column names)
+    if (user) {
+      if (feature === "ranked_session") {
+        await sql`INSERT INTO user_daily_usage (identity_key, user_id, user_tier, usage_date, ranked_sessions_used) VALUES (${'u:' + user.id}, ${user.id}, ${tier}, ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET ranked_sessions_used = user_daily_usage.ranked_sessions_used + 1, updated_at = now()`;
+      } else if (feature === "hint") {
+        await sql`INSERT INTO user_daily_usage (identity_key, user_id, user_tier, usage_date, hints_used) VALUES (${'u:' + user.id}, ${user.id}, ${tier}, ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET hints_used = user_daily_usage.hints_used + 1, updated_at = now()`;
+      } else if (feature === "assist") {
+        await sql`INSERT INTO user_daily_usage (identity_key, user_id, user_tier, usage_date, assists_used) VALUES (${'u:' + user.id}, ${user.id}, ${tier}, ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET assists_used = user_daily_usage.assists_used + 1, updated_at = now()`;
+      } else if (feature === "normal_chat") {
+        await sql`INSERT INTO user_daily_usage (identity_key, user_id, user_tier, usage_date, normal_chat_calls) VALUES (${'u:' + user.id}, ${user.id}, ${tier}, ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET normal_chat_calls = user_daily_usage.normal_chat_calls + 1, updated_at = now()`;
+      } else if (feature === "ai_call") {
+        await sql`INSERT INTO user_daily_usage (identity_key, user_id, user_tier, usage_date, ai_calls) VALUES (${'u:' + user.id}, ${user.id}, ${tier}, ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET ai_calls = user_daily_usage.ai_calls + 1, updated_at = now()`;
+      }
+    } else {
+      const anonId = String(anonymousId ?? "");
+      if (!anonId) return error(res, 400, "anonymousId required for anonymous users.");
+      if (feature === "ranked_session") {
+        await sql`INSERT INTO user_daily_usage (identity_key, anonymous_id, user_tier, usage_date, ranked_sessions_used) VALUES (${'a:' + anonId}, ${anonId}, 'anonymous', ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET ranked_sessions_used = user_daily_usage.ranked_sessions_used + 1, updated_at = now()`;
+      } else if (feature === "hint") {
+        await sql`INSERT INTO user_daily_usage (identity_key, anonymous_id, user_tier, usage_date, hints_used) VALUES (${'a:' + anonId}, ${anonId}, 'anonymous', ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET hints_used = user_daily_usage.hints_used + 1, updated_at = now()`;
+      } else if (feature === "assist") {
+        await sql`INSERT INTO user_daily_usage (identity_key, anonymous_id, user_tier, usage_date, assists_used) VALUES (${'a:' + anonId}, ${anonId}, 'anonymous', ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET assists_used = user_daily_usage.assists_used + 1, updated_at = now()`;
+      } else if (feature === "normal_chat") {
+        await sql`INSERT INTO user_daily_usage (identity_key, anonymous_id, user_tier, usage_date, normal_chat_calls) VALUES (${'a:' + anonId}, ${anonId}, 'anonymous', ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET normal_chat_calls = user_daily_usage.normal_chat_calls + 1, updated_at = now()`;
+      } else if (feature === "ai_call") {
+        await sql`INSERT INTO user_daily_usage (identity_key, anonymous_id, user_tier, usage_date, ai_calls) VALUES (${'a:' + anonId}, ${anonId}, 'anonymous', ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET ai_calls = user_daily_usage.ai_calls + 1, updated_at = now()`;
+      }
+    }
+
+    const usage = await getTodayUsage(user?.id ?? null, !user ? String(anonymousId ?? "") : null);
+    const allLimits = await getTierLimits();
+    const limits = allLimits[tier] ?? allLimits.free;
+    return res.status(200).json({ ok: true, usage, tier, limits });
+  }
+
+  // ── Get Usage & Limits ────────────────────────────────────────────────────
+  if (req.method === "GET" && path === "/usage") {
+    const user = await requireUser(String(req.query.token ?? ""));
+    const anonymousId = String(req.query.anonymousId ?? "");
+    const tier = getUserTier(user);
+    const usage = await getTodayUsage(user?.id ?? null, !user ? anonymousId : null);
+    const allLimits = await getTierLimits();
+    const limits = allLimits[tier] ?? allLimits.free;
+    const tomorrow = new Date(); tomorrow.setUTCHours(24, 0, 0, 0);
+    return res.status(200).json({
+      tier,
+      usage: { rankedSessions: usage.ranked_sessions_used, hints: usage.hints_used, assists: usage.assists_used },
+      limits: { rankedSessionsPerDay: limits.rankedSessionsPerDay, hintsPerDay: limits.hintsPerDay, assistsPerDay: limits.assistsPerDay },
+      resetAt: tomorrow.toISOString(),
+      user: user ? publicUser(user) : null,
+    });
+  }
+
+  // ── Log AI Usage (internal) ───────────────────────────────────────────────
+  if (req.method === "POST" && path === "/admin/log-ai-usage") {
+    const body = req.body ?? {};
+    await logAiUsage({
+      userId: body.userId ?? null,
+      userCategory: body.userCategory ?? 'anonymous',
+      sessionId: body.sessionId ?? null,
+      requestType: body.requestType ?? 'other',
+      challengeId: body.challengeId ?? null,
+      challengeName: body.challengeName ?? null,
+      characterName: body.characterName ?? null,
+      model: body.model ?? 'gpt-4o-mini',
+      promptTokens: body.promptTokens ?? 0,
+      completionTokens: body.completionTokens ?? 0,
+      success: body.success ?? true,
+      errorMessage: body.errorMessage ?? null,
+    });
+    if (body.userId) {
+      await sql`UPDATE users SET last_active_at = now() WHERE id = ${body.userId}`.catch(() => {});
+    }
     return res.status(200).json({ ok: true });
   }
 

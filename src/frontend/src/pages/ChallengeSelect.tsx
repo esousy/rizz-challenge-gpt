@@ -186,12 +186,7 @@ export default function ChallengeSelect() {
   const bestScores: BestScores = progress.bestScores;
 
   async function handleChallengeClick(challengeId: string) {
-    // Anonymous gate: show signup if guest has used their free session
-    if (!isAuthenticated && guestSessionsCompleted >= 1) {
-      setShowGuestWall(true);
-      return;
-    }
-    // Central ranked-session gate (handles plan check, limit check, increment, navigate)
+    // All limit checking is now done server-side via useRankedSession
     await startRankedSession(challengeId);
   }
 

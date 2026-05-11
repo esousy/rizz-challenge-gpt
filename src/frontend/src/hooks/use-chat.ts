@@ -134,14 +134,11 @@ export function useChat(
   // Expose mock mode so consumers can display the indicator
   const mockMode = isMockMode;
 
-  // Check live key status whenever actor becomes available and mock mode is off
+  // Live key is active when not in mock mode — the OpenAI key is configured
+  // server-side via Vercel env var (OPENAI_API_KEY), never exposed to the browser.
   useEffect(() => {
-    if (isMockMode || !actor || isFetching) return;
-    actor
-      .getOpenAIKeyStatus()
-      .then((isSet) => setLiveKeyActive(isSet && !isMockMode))
-      .catch(() => setLiveKeyActive(false));
-  }, [actor, isFetching, isMockMode]);
+    setLiveKeyActive(!isMockMode);
+  }, [isMockMode]);
 
   // No fetchApiKey — the OpenAI key is handled server-side only by the proxy route.
 
@@ -166,7 +163,6 @@ export function useChat(
     async (userText: string) => {
       // In mock mode we don't need actor; in live mode we do
       if (!userText.trim() || sessionComplete) return;
-      if (!isMockMode && (!actor || isFetching)) return;
 
       const userMsg: Message = {
         id: `user-${Date.now()}`,
@@ -474,7 +470,7 @@ export function useChat(
     lastCoachHint,
     lastCoachTone,
     sessionComplete,
-    actorReady: isMockMode ? true : !!actor && !isFetching,
+    actorReady: true, // Always ready — live mode uses server-side proxy, mock mode is local
     mockMode,
     liveKeyActive,
     sendMessage,

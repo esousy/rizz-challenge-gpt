@@ -1,24 +1,22 @@
 /**
  * Mock mode is now controlled globally by the admin via the backend.
- * This hook reads the backend mock mode setting.
+ * This hook reads the mock mode setting from the /api/app/settings endpoint.
  * Defaults to true (safe) if backend is unavailable.
  */
-import { createActor } from "@/backend";
-import { useActor } from "@caffeineai/core-infrastructure";
+import { appApi } from "@/lib/app-api";
 import { useEffect, useState } from "react";
 
 export function useMockMode() {
-  const { actor, isFetching } = useActor(createActor);
   const [isMockMode, setIsMockMode] = useState<boolean>(true);
 
   useEffect(() => {
-    if (!actor || isFetching) return;
-    actor
-      .getMockMode()
-      .then((mode) => {
+    appApi
+      .getSettings()
+      .then((result) => {
+        const mode = result.settings.mockMode ?? true;
         if (!mode) {
           console.log(
-            "[useMockMode] Switched to LIVE AI mode (backend getMockMode = false)",
+            "[useMockMode] Switched to LIVE AI mode (backend mockMode = false)",
           );
         }
         setIsMockMode(mode);
@@ -29,7 +27,7 @@ export function useMockMode() {
         );
         setIsMockMode(true);
       });
-  }, [actor, isFetching]);
+  }, []);
 
   return { isMockMode };
 }

@@ -27,6 +27,7 @@ import {
   Users,
   XCircle,
   Zap,
+  BarChart2,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -52,6 +53,7 @@ const STATUS_FILTERS = ["all", "active", "suspended", "blocked"] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 type AdminTab =
+  | "dashboard"
   | "users"
   | "ai-settings"
   | "challenges"
@@ -65,6 +67,7 @@ const NAV_ITEMS: {
   icon: React.ReactNode;
   active: boolean;
 }[] = [
+  { id: "dashboard", label: "Dashboard", icon: <BarChart2 size={16} />, active: true },
   { id: "users", label: "Users", icon: <Users size={16} />, active: true },
   {
     id: "ai-settings",
@@ -159,6 +162,140 @@ function ConfirmDialog({
 
 type ActorType = backendInterface | null;
 
+// ── Dashboard Tab ──────────────────────────────────────────────────────────
+function DashboardTab({ adminToken }: { adminToken: string }) {
+  const [data, setData] = useState<Record<string, any> | null>(null);
+  const [errors, setErrors] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      appApi.adminDashboard(adminToken),
+      appApi.adminAiErrors(adminToken, 20),
+    ])
+      .then(([dash, errs]) => {
+        setData(dash as Record<string, any>);
+        setErrors(errs.errors ?? []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [adminToken]);
+
+  if (loading) return <div className="text-zinc-500 text-sm p-4">Loading dashboard...</div>;
+  if (!data) return <div className="text-zinc-500 text-sm p-4">Failed to load dashboard data.</div>;
+
+  function MetricCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+    return (
+      <div className={`bg-zinc-900 border rounded-2xl p-4 flex flex-col gap-1 ${accent ? 'border-violet-700/50' : 'border-zinc-800'}`}>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{label}</p>
+        <p className={`text-xl font-bold font-display ${accent ? 'text-violet-400' : 'text-white'}`}>{value}</p>
+        {sub && <p className="text-xs text-zinc-500">{sub}</p>}
+      </div>
+    );
+  }
+
+  function Section({ period, metrics }: { period: string; metrics: any }) {
+    const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+    const fmtUsd = (n: number) => n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`;
+    return (
+      <div className="flex flex-col gap-4">
+        <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">{period}</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <MetricCard label="New Users" value={fmt(metrics.newUsers)} />
+          <MetricCard label="Active Users" value={fmt(metrics.activeUsers)} />
+          <MetricCard label="Ranked Sessions" value={fmt(metrics.rankedSessions)} />
+          <MetricCard label="AI Calls" value={fmt(metrics.aiCalls)} />
+          <MetricCard label="Total Tokens" value={fmt(metrics.totalTokens)} />
+          <MetricCard label="AI Cost" value={fmtUsd(metrics.estimatedCost)} />
+          <MetricCard label="Revenue" value={fmtUsd(metrics.estimatedRevenue)} />
+          <MetricCard label="Profit" value={fmtUsd(metrics.estimatedProfit)} accent />
+        </div>
+      </div>
+    );
+  }
+
+  const today = data.today ?? {};
+  const last7 = data.last7Days ?? {};
+  const last30 = data.last30Days ?? {};
+  const features = Object.entries(last30.byFeature ?? {}) as [string, any][];
+  const categories = Object.entries(last30.byCategory ?? {}) as [string, any][];
+  const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
+
+  return (
+    <div className="flex flex-col gap-8 max-w-5xl">
+      <Section period="Today" metrics={today} />
+      <Section period="Last 7 Days" metrics={last7} />
+      <Section period="Last 30 Days" metrics={last30} />
+
+      <div className="flex flex-col gap-3">
+        <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Usage by Category (30 days)</h3>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase">
+              <th className="px-4 py-3 text-left">Category</th><th className="px-4 py-3 text-right">Calls</th><th className="px-4 py-3 text-right">Tokens</th><th className="px-4 py-3 text-right">Cost</th>
+            </tr></thead>
+            <tbody>
+              {categories.map(([cat, v]: [string, any]) => (
+                <tr key={cat} className="border-b border-zinc-800/50">
+                  <td className="px-4 py-2 text-white font-medium capitalize">{cat}</td>
+                  <td className="px-4 py-2 text-right text-zinc-300">{v.calls}</td>
+                  <td className="px-4 py-2 text-right text-zinc-300">{v.tokens}</td>
+                  <td className="px-4 py-2 text-right text-zinc-300">{fmtUsd(v.cost)}</td>
+                </tr>
+              ))}
+              {categories.length === 0 && <tr><td colSpan={4} className="px-4 py-4 text-zinc-600 text-center">No data yet</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Cost by Feature (30 days)</h3>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase">
+              <th className="px-4 py-3 text-left">Feature</th><th className="px-4 py-3 text-right">Calls</th><th className="px-4 py-3 text-right">Cost</th>
+            </tr></thead>
+            <tbody>
+              {features.map(([feat, v]: [string, any]) => (
+                <tr key={feat} className="border-b border-zinc-800/50">
+                  <td className="px-4 py-2 text-white font-medium">{feat.replace(/_/g, ' ')}</td>
+                  <td className="px-4 py-2 text-right text-zinc-300">{v.calls}</td>
+                  <td className="px-4 py-2 text-right text-zinc-300">{fmtUsd(v.cost)}</td>
+                </tr>
+              ))}
+              {features.length === 0 && <tr><td colSpan={3} className="px-4 py-4 text-zinc-600 text-center">No data yet</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Recent AI Errors</h3>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase">
+              <th className="px-4 py-3 text-left">Time</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Model</th><th className="px-4 py-3 text-left">User</th><th className="px-4 py-3 text-left">Error</th>
+            </tr></thead>
+            <tbody>
+              {errors.map((e: any, i: number) => (
+                <tr key={i} className="border-b border-zinc-800/50">
+                  <td className="px-4 py-2 text-zinc-500 whitespace-nowrap">{new Date(e.created_at).toLocaleString()}</td>
+                  <td className="px-4 py-2 text-zinc-300">{e.request_type}</td>
+                  <td className="px-4 py-2 text-zinc-300">{e.model}</td>
+                  <td className="px-4 py-2 text-zinc-300">{e.username ?? 'anon'}</td>
+                  <td className="px-4 py-2 text-red-400 max-w-xs truncate">{e.error_message}</td>
+                </tr>
+              ))}
+              {errors.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-zinc-600 text-center">No errors 🎉</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UsersTab({
   adminToken,
   actor,
@@ -179,6 +316,26 @@ function UsersTab({
     msg: string;
     fn: () => void;
   } | null>(null);
+
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [userDetail, setUserDetail] = useState<Record<string, any> | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  function handleViewUser(userId: string) {
+    setSelectedUserId(userId);
+    setDetailLoading(true);
+    appApi.adminUserUsage(adminToken, userId)
+      .then((data) => setUserDetail(data as Record<string, any>))
+      .catch(() => setUserDetail(null))
+      .finally(() => setDetailLoading(false));
+  }
+
+  function closeUserDetail() {
+    setSelectedUserId(null);
+    setUserDetail(null);
+  }
+
+  const fmtUsd = (n: number) => n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`;
 
   const load = useCallback(async () => {
     if (isFetching) return;
@@ -509,6 +666,14 @@ function UsersTab({
                   )}
                   <button
                     type="button"
+                    onClick={() => handleViewUser(u.id)}
+                    className="text-[11px] px-3 py-1.5 rounded-lg border border-violet-500/40 text-violet-400 hover:bg-violet-900/30 transition-colors"
+                    data-ocid={`admin.view_user_button.${i + 1}`}
+                  >
+                    📊 Details
+                  </button>
+                  <button
+                    type="button"
                     disabled={isActing}
                     onClick={() =>
                       setConfirm({
@@ -539,6 +704,153 @@ function UsersTab({
           onCancel={() => setConfirm(null)}
         />
       )}
+
+      {/* User Detail Modal */}
+      {selectedUserId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-md" onClick={closeUserDetail}>
+          <div className="relative z-10 w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-card border border-border rounded-2xl" onClick={(e) => e.stopPropagation()}>
+            {detailLoading ? (
+              <div className="p-8 text-center text-zinc-500">Loading user details...</div>
+            ) : !userDetail ? (
+              <div className="p-8 text-center text-zinc-500">Failed to load user details.</div>
+            ) : (
+              <>
+                <div className="sticky top-0 bg-card/95 backdrop-blur-sm border-b border-border px-6 py-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold font-display text-foreground">{userDetail.user?.username ?? 'Unknown'}</h3>
+                    <p className="text-xs text-muted-foreground">{userDetail.user?.email ?? ''}</p>
+                  </div>
+                  <button type="button" onClick={closeUserDetail} className="text-zinc-500 hover:text-white">✕</button>
+                </div>
+                <div className="px-6 py-4 flex flex-col gap-5">
+                  {/* Profile Info */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Plan</p>
+                      <p className="text-sm font-semibold text-white capitalize">{userDetail.user?.plan ?? 'free'}</p>
+                    </div>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Rank</p>
+                      <p className="text-sm font-semibold text-white capitalize">{userDetail.user?.rank ?? 'rookie'}</p>
+                    </div>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Streak</p>
+                      <p className="text-sm font-semibold text-white">{userDetail.user?.streak ?? 0} 🔥</p>
+                    </div>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Joined</p>
+                      <p className="text-xs text-zinc-300">{userDetail.user?.createdAt ? new Date(userDetail.user.createdAt).toLocaleDateString() : 'N/A'}</p>
+                    </div>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Last Active</p>
+                      <p className="text-xs text-zinc-300">{userDetail.user?.lastActiveAt ? new Date(userDetail.user.lastActiveAt).toLocaleDateString() : 'N/A'}</p>
+                    </div>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Total XP</p>
+                      <p className="text-sm font-semibold text-white">{userDetail.user?.totalXp ?? 0}</p>
+                    </div>
+                  </div>
+
+                  {/* Usage Stats */}
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 mb-3">Usage</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Sessions Today</p>
+                        <p className="text-sm font-semibold text-white">{userDetail.usage?.rankedSessionsToday ?? 0}/{userDetail.usage?.totalRankedSessions ?? 0}</p>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Hints Today/Total</p>
+                        <p className="text-sm font-semibold text-white">{userDetail.usage?.hintsToday ?? 0}/{userDetail.usage?.totalHints ?? 0}</p>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Assists Today/Total</p>
+                        <p className="text-sm font-semibold text-white">{userDetail.usage?.assistsToday ?? 0}/{userDetail.usage?.totalAssists ?? 0}</p>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Chat Calls Today</p>
+                        <p className="text-sm font-semibold text-white">{userDetail.usage?.chatCallsToday ?? 0}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* AI Cost Breakdown */}
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 mb-3">AI Cost</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">AI Calls</p>
+                        <p className="text-sm font-semibold text-white">{userDetail.usage?.totalAiCalls ?? 0}</p>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Tokens</p>
+                        <p className="text-sm font-semibold text-white">{(userDetail.usage?.totalTokens ?? 0).toLocaleString()}</p>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">AI Cost</p>
+                        <p className="text-sm font-semibold text-red-400">{fmtUsd(userDetail.usage?.estimatedCost ?? 0)}</p>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Profit</p>
+                        <p className={`text-sm font-semibold ${userDetail.usage?.estimatedProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtUsd(userDetail.usage?.estimatedProfit ?? 0)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Session History */}
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 mb-3">Session History (last 50)</h4>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-zinc-900"><tr className="border-b border-zinc-800 text-zinc-500 uppercase">
+                          <th className="px-3 py-2 text-left">Date</th><th className="px-3 py-2 text-left">Challenge</th><th className="px-3 py-2 text-right">Score</th><th className="px-3 py-2 text-right">Interest</th><th className="px-3 py-2 text-right">XP</th>
+                        </tr></thead>
+                        <tbody>
+                          {(userDetail.sessionHistory ?? []).map((s: any, i: number) => (
+                            <tr key={i} className="border-b border-zinc-800/50">
+                              <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap">{new Date(s.created_at).toLocaleDateString()}</td>
+                              <td className="px-3 py-1.5 text-zinc-300">{s.challenge_id}</td>
+                              <td className="px-3 py-1.5 text-right text-zinc-300">{s.score ?? '-'}</td>
+                              <td className="px-3 py-1.5 text-right text-zinc-300">{s.final_interest ?? '-'}%</td>
+                              <td className="px-3 py-1.5 text-right text-[oklch(0.78_0.18_60)]">+{s.xp_earned ?? 0}</td>
+                            </tr>
+                          ))}
+                          {(userDetail.sessionHistory ?? []).length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-center text-zinc-600">No sessions yet</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Recent AI Requests */}
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 mb-3">Recent AI Requests (last 50)</h4>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-zinc-900"><tr className="border-b border-zinc-800 text-zinc-500 uppercase">
+                          <th className="px-3 py-2 text-left">Time</th><th className="px-3 py-2 text-left">Type</th><th className="px-3 py-2 text-left">Model</th><th className="px-3 py-2 text-right">Tokens</th><th className="px-3 py-2 text-right">Cost</th><th className="px-3 py-2 text-center">OK?</th>
+                        </tr></thead>
+                        <tbody>
+                          {(userDetail.recentAi ?? []).map((r: any, i: number) => (
+                            <tr key={i} className="border-b border-zinc-800/50">
+                              <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap">{new Date(r.created_at).toLocaleString()}</td>
+                              <td className="px-3 py-1.5 text-zinc-300">{r.request_type}</td>
+                              <td className="px-3 py-1.5 text-zinc-300">{r.model}</td>
+                              <td className="px-3 py-1.5 text-right text-zinc-300">{r.total_tokens}</td>
+                              <td className="px-3 py-1.5 text-right text-zinc-300">{fmtUsd(Number(r.estimated_cost_usd))}</td>
+                              <td className="px-3 py-1.5 text-center">{r.success ? '✅' : '❌'}</td>
+                            </tr>
+                          ))}
+                          {(userDetail.recentAi ?? []).length === 0 && <tr><td colSpan={6} className="px-3 py-4 text-center text-zinc-600">No AI calls yet</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -547,8 +859,6 @@ function UsersTab({
 
 function AISettingsTab({
   adminToken,
-  actor,
-  isFetching,
 }: {
   adminToken: string;
   actor: ActorType;
@@ -556,32 +866,15 @@ function AISettingsTab({
 }) {
   const [mockMode, setMockModeState] = useState<boolean | null>(null);
   const [mockLoading, setMockLoading] = useState(false);
-  const [keyValue, setKeyValue] = useState("");
-  const [keyStatus, setKeyStatus] = useState<boolean | null>(null);
-  const [keyLoading, setKeyLoading] = useState(false);
-  const [keyFeedback, setKeyFeedback] = useState<{
-    type: "success" | "error";
-    msg: string;
-  } | null>(null);
-  const keyRef = useRef<HTMLInputElement>(null);
 
   const loadSettings = useCallback(async () => {
-    if (isFetching) return;
     try {
-      if (actor) {
-        const [mock, keyResult] = await Promise.all([
-          actor.getMockMode(),
-          actor.getOpenAIKeyStatus(),
-        ]);
-        setMockModeState(mock);
-        setKeyStatus(keyResult);
-      } else {
-        const result = await appApi.getSettings();
-        setMockModeState(result.settings.mockMode ?? false);
-        setKeyStatus(null);
-      }
-    } catch {}
-  }, [actor, isFetching]);
+      const result = await appApi.getSettings();
+      setMockModeState(result.settings.mockMode ?? true);
+    } catch {
+      setMockModeState(true);
+    }
+  }, []);
 
   useEffect(() => {
     loadSettings();
@@ -592,72 +885,11 @@ function AISettingsTab({
     setMockLoading(true);
     try {
       const next = !mockMode;
-      if (actor) {
-        await actor.setMockMode(adminToken, next);
-      } else {
-        await appApi.saveSetting(adminToken, "mockMode", next);
-      }
+      await appApi.saveSetting(adminToken, "mockMode", next);
       setMockModeState(next);
     } catch {
     } finally {
       setMockLoading(false);
-    }
-  }
-
-  async function handleSaveKey(e: React.FormEvent) {
-    e.preventDefault();
-    if (!keyValue.trim()) return;
-    setKeyLoading(true);
-    setKeyFeedback(null);
-    if (!actor) {
-      setKeyFeedback({
-        type: "error",
-        msg: "Set OPENAI_API_KEY in Vercel Project Settings -> Environment Variables, then redeploy.",
-      });
-      setKeyLoading(false);
-      return;
-    }
-    try {
-      const result = await actor.setOpenAIKey(adminToken, keyValue.trim());
-      if (result.__kind__ === "ok") {
-        // Re-verify that the key is now active
-        const statusResult = await actor.getOpenAIKeyStatus();
-        if (statusResult) {
-          setKeyStatus(true);
-          setKeyValue("");
-          setKeyFeedback({
-            type: "success",
-            msg: "API key saved successfully.",
-          });
-        } else {
-          setKeyFeedback({
-            type: "error",
-            msg: "Key saved but could not be verified. Please try again.",
-          });
-        }
-      } else {
-        // Map AuthError variants to human-readable messages
-        const errKind = result.err.__kind__;
-        let errMsg: string;
-        if (errKind === "unauthorized") {
-          errMsg = "Session expired. Please log out and log back in.";
-        } else if (errKind === "invalidInput") {
-          const detail = (
-            result.err as { __kind__: "invalidInput"; invalidInput: string }
-          ).invalidInput;
-          errMsg = `Invalid API key format: ${detail}. Key must start with sk-`;
-        } else {
-          errMsg = "Failed to save API key. Please try again.";
-        }
-        setKeyFeedback({ type: "error", msg: errMsg });
-      }
-    } catch {
-      setKeyFeedback({
-        type: "error",
-        msg: "Failed to save key. Check your connection and try again.",
-      });
-    } finally {
-      setKeyLoading(false);
     }
   }
 
@@ -719,79 +951,12 @@ function AISettingsTab({
         <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
           OpenAI API Key
         </p>
-        <div
-          className={`flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm font-medium ${
-            keyStatus === true
-              ? "bg-emerald-900/20 border-emerald-700/40 text-emerald-400"
-              : keyStatus === false
-                ? "bg-red-950/20 border-red-700/40 text-red-400"
-                : "bg-zinc-800 border-zinc-700 text-zinc-500"
-          }`}
-          data-ocid="admin.key_status"
-        >
-          {keyStatus === true ? (
-            <>
-              <CheckCircle2 size={14} /> API key active
-            </>
-          ) : keyStatus === false ? (
-            <>
-              <XCircle size={14} /> No API key configured
-            </>
-          ) : (
-            <span>Checking…</span>
-          )}
+        <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm font-medium bg-emerald-900/20 border-emerald-700/40 text-emerald-400">
+          <CheckCircle2 size={14} /> API key configured via Vercel environment variable
         </div>
-        <form onSubmit={handleSaveKey} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="admin-api-key"
-              className="text-xs font-semibold text-zinc-400 uppercase tracking-wide"
-            >
-              New API Key
-            </label>
-            <input
-              ref={keyRef}
-              id="admin-api-key"
-              type="password"
-              value={keyValue}
-              onChange={(e) => setKeyValue(e.target.value)}
-              placeholder="sk-…"
-              autoComplete="off"
-              spellCheck={false}
-              className="w-full h-10 rounded-xl bg-zinc-800 border border-zinc-700 px-4 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 transition-colors"
-              data-ocid="admin.api_key_input"
-            />
-          </div>
-          {keyFeedback && (
-            <p
-              className={`text-sm flex items-center gap-1.5 ${
-                keyFeedback.type === "success"
-                  ? "text-emerald-400"
-                  : "text-red-400"
-              }`}
-              data-ocid={
-                keyFeedback.type === "success"
-                  ? "admin.key_success_state"
-                  : "admin.key_error_state"
-              }
-            >
-              {keyFeedback.type === "success" ? (
-                <CheckCircle2 size={13} />
-              ) : (
-                <XCircle size={13} />
-              )}
-              {keyFeedback.msg}
-            </p>
-          )}
-          <Button
-            type="submit"
-            disabled={!keyValue.trim() || keyLoading}
-            className="bg-violet-600 hover:bg-violet-500 text-white border-0"
-            data-ocid="admin.save_key_button"
-          >
-            {keyLoading ? "Saving…" : "Save API Key"}
-          </Button>
-        </form>
+        <p className="text-xs text-zinc-500">
+          The OPENAI_API_KEY is set in your Vercel project settings (Environment Variables). No need to manage it here.
+        </p>
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex flex-col gap-3">
@@ -818,259 +983,142 @@ function AISettingsTab({
 
 function AppSettingsTab({
   adminToken,
-  actor,
-  isFetching,
 }: {
   adminToken: string;
   actor: ActorType;
   isFetching: boolean;
 }) {
-  const [_config, setConfig] = useState<{
-    rankedSessionsPerDay: number;
-    rizzAssistPerSession: number;
-    hintsPerSession: number;
-  } | null>(null);
-  const [draft, setDraft] = useState<{
-    rankedSessionsPerDay: number;
-    rizzAssistPerSession: number;
-    hintsPerSession: number;
-  } | null>(null);
+  const [tierLimits, setTierLimits] = useState<Record<string, any> | null>(null);
+  const [draft, setDraft] = useState<Record<string, any> | null>(null);
   const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState<{
-    type: "success" | "error";
-    msg: string;
-  } | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (isFetching) return;
     setLoading(true);
     try {
-      const cfg = actor
-        ? await actor.getFreePlanConfig()
-        : ((await appApi.getSettings()).settings.freePlanConfig ?? {
-            rankedSessionsPerDay: 3,
-            rizzAssistPerSession: 1,
-            hintsPerSession: 3,
-          });
-      const parsed = {
-        rankedSessionsPerDay: Number(cfg.rankedSessionsPerDay),
-        rizzAssistPerSession: Number(cfg.rizzAssistPerSession),
-        hintsPerSession: Number(cfg.hintsPerSession),
-      };
-      setConfig(parsed);
-      setDraft({ ...parsed });
+      const result = await appApi.getSettings();
+      const limits: Record<string, any> = {};
+      // Read tier limits from settings
+      for (const tier of ["anonymous", "free", "pro", "admin"]) {
+        const key = `tierLimits_${tier}`;
+        limits[tier] = result.settings[key as keyof typeof result.settings] ?? { rankedSessionsPerDay: tier === "pro" || tier === "admin" ? null : 3, hintsPerDay: tier === "pro" || tier === "admin" ? null : 10, assistsPerDay: tier === "pro" || tier === "admin" ? null : 1 };
+      }
+      setTierLimits(limits);
+      setDraft(JSON.parse(JSON.stringify(limits)));
     } catch {
-      setFeedback({ type: "error", msg: "Failed to load config." });
+      setFeedback({ type: "error", msg: "Failed to load tier limits." });
     } finally {
       setLoading(false);
     }
-  }, [actor, isFetching]);
+  }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSave() {
     if (!draft) return;
     setSaving(true);
     setFeedback(null);
     try {
-      if (actor) {
-        const result = await actor.setFreePlanConfig(adminToken, {
-          rankedSessionsPerDay: BigInt(draft.rankedSessionsPerDay),
-          rizzAssistPerSession: BigInt(draft.rizzAssistPerSession),
-          hintsPerSession: BigInt(draft.hintsPerSession),
-        });
-        if (result.__kind__ !== "ok") {
-          setFeedback({
-            type: "error",
-            msg: "Failed to save. Check admin session.",
-          });
-          return;
-        }
-      } else {
-        if (adminToken.startsWith("standalone-admin:")) {
-          setFeedback({
-            type: "error",
-            msg: "Please log out and log in again to save settings.",
-          });
-          return;
-        }
-        await appApi.saveSetting(adminToken, "freePlanConfig", draft);
+      for (const [tier, limits] of Object.entries(draft)) {
+        await appApi.saveSetting(adminToken, `tierLimits_${tier}`, limits);
       }
-      setConfig({ ...draft });
-      setFeedback({ type: "success", msg: "Free Plan settings saved." });
+      setTierLimits(JSON.parse(JSON.stringify(draft)));
+      setFeedback({ type: "success", msg: "Tier limits saved." });
     } catch {
-      setFeedback({ type: "error", msg: "Connection error." });
+      setFeedback({ type: "error", msg: "Failed to save." });
     } finally {
       setSaving(false);
     }
   }
 
-  type DraftConfig = NonNullable<typeof draft>;
-  function setField(key: keyof DraftConfig, val: number) {
-    setDraft((prev) => (prev ? { ...prev, [key]: val } : prev));
+  function updateField(tier: string, field: string, value: number | null) {
+    setDraft((prev: any) => {
+      if (!prev) return prev;
+      const updated = JSON.parse(JSON.stringify(prev));
+      updated[tier][field] = value;
+      return updated;
+    });
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <span className="w-7 h-7 rounded-full border-2 border-violet-400/30 border-t-violet-400 animate-spin" />
-      </div>
-    );
+    return <div className="flex items-center justify-center py-16"><span className="w-7 h-7 rounded-full border-2 border-violet-400/30 border-t-violet-400 animate-spin" /></div>;
   }
+
+  const TIERS = [
+    { key: "anonymous", label: "Anonymous", emoji: "👤", desc: "Not logged in — browser-based identity" },
+    { key: "free", label: "Free", emoji: "🆓", desc: "Logged in, no subscription" },
+    { key: "pro", label: "Pro", emoji: "👑", desc: "Paid subscription" },
+    { key: "admin", label: "Admin", emoji: "🛡️", desc: "Admin users" },
+  ];
+
+  const FIELDS = [
+    { key: "rankedSessionsPerDay", label: "Ranked Sessions / day" },
+    { key: "hintsPerDay", label: "Hints / day" },
+    { key: "assistsPerDay", label: "Assists / day" },
+  ];
 
   return (
     <div className="flex flex-col gap-6 max-w-lg">
       <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-950/40 border border-violet-800/40">
         <Shield size={13} className="text-violet-400 flex-shrink-0" />
         <p className="text-xs text-violet-300">
-          These limits apply globally to all Free plan users.
+          Limits are enforced server-side in Neon DB. Leave blank for unlimited.
         </p>
       </div>
 
-      {/* Free Plan Settings */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex flex-col gap-5">
-        <div className="flex items-center gap-2">
-          <Sliders size={14} className="text-violet-400" />
-          <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
-            Free Plan Limits
-          </p>
+      {TIERS.map((tier) => (
+        <div key={tier.key} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">{tier.emoji}</span>
+            <p className="text-sm font-bold text-white">{tier.label}</p>
+            <p className="text-xs text-zinc-500 ml-2">{tier.desc}</p>
+          </div>
+
+          {FIELDS.map((field) => {
+            const val = draft?.[tier.key]?.[field.key];
+            const isUnlimited = val === null;
+            return (
+              <div key={field.key} className="flex items-center gap-3">
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wide w-40 flex-shrink-0">{field.label}</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={999}
+                  value={isUnlimited ? "" : (val ?? "")}
+                  disabled={isUnlimited}
+                  onChange={(e) => updateField(tier.key, field.key, Number(e.target.value))}
+                  className="w-24 h-9 rounded-lg bg-zinc-800 border border-zinc-700 px-3 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-violet-500 disabled:opacity-40"
+                />
+                <button
+                  type="button"
+                  onClick={() => updateField(tier.key, field.key, isUnlimited ? 0 : null)}
+                  className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border transition-colors ${isUnlimited ? "bg-emerald-900/20 border-emerald-700/40 text-emerald-400" : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300"}`}
+                >
+                  ∞ Unlimited
+                </button>
+              </div>
+            );
+          })}
         </div>
+      ))}
 
-        <form onSubmit={handleSave} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="aset-ranked"
-              className="text-xs font-semibold text-zinc-400 uppercase tracking-wide"
-            >
-              Ranked sessions per day
-            </label>
-            <input
-              id="aset-ranked"
-              type="number"
-              min={1}
-              max={99}
-              value={draft?.rankedSessionsPerDay ?? ""}
-              onChange={(e) =>
-                setField("rankedSessionsPerDay", Number(e.target.value))
-              }
-              className="w-full h-10 rounded-xl bg-zinc-800 border border-zinc-700 px-4 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 transition-colors"
-              data-ocid="admin.free_plan_ranked_input"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="aset-assist"
-              className="text-xs font-semibold text-zinc-400 uppercase tracking-wide"
-            >
-              Rizz Assist uses per session
-            </label>
-            <input
-              id="aset-assist"
-              type="number"
-              min={1}
-              max={99}
-              value={draft?.rizzAssistPerSession ?? ""}
-              onChange={(e) =>
-                setField("rizzAssistPerSession", Number(e.target.value))
-              }
-              className="w-full h-10 rounded-xl bg-zinc-800 border border-zinc-700 px-4 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 transition-colors"
-              data-ocid="admin.free_plan_assist_input"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="aset-hints"
-              className="text-xs font-semibold text-zinc-400 uppercase tracking-wide"
-            >
-              Hint uses per session
-            </label>
-            <input
-              id="aset-hints"
-              type="number"
-              min={1}
-              max={99}
-              value={draft?.hintsPerSession ?? ""}
-              onChange={(e) =>
-                setField("hintsPerSession", Number(e.target.value))
-              }
-              className="w-full h-10 rounded-xl bg-zinc-800 border border-zinc-700 px-4 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 transition-colors"
-              data-ocid="admin.free_plan_hints_input"
-            />
-          </div>
-
-          {feedback && (
-            <p
-              className={`text-sm flex items-center gap-1.5 ${
-                feedback.type === "success"
-                  ? "text-emerald-400"
-                  : "text-red-400"
-              }`}
-              data-ocid={
-                feedback.type === "success"
-                  ? "admin.free_plan_success_state"
-                  : "admin.free_plan_error_state"
-              }
-            >
-              {feedback.type === "success" ? (
-                <CheckCircle2 size={13} />
-              ) : (
-                <XCircle size={13} />
-              )}
-              {feedback.msg}
-            </p>
-          )}
-
-          <Button
-            type="submit"
-            disabled={saving || !draft}
-            className="bg-violet-600 hover:bg-violet-500 text-white border-0"
-            data-ocid="admin.free_plan_save_button"
-          >
-            {saving ? "Saving…" : "Save Free Plan Settings"}
-          </Button>
-        </form>
-      </div>
-
-      {/* Rizz Pro plan info (read-only placeholder) */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <Crown size={14} className="text-amber-400" />
-          <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
-            Rizz Pro Plan
-          </p>
-          <span className="ml-auto text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-400/10 border border-amber-400/30 text-amber-400">
-            Coming Soon
-          </span>
-        </div>
-        <p className="text-sm font-semibold text-white">$9.99 / month</p>
-        <ul className="flex flex-col gap-1 text-xs text-zinc-500">
-          {[
-            "Unlimited ranked sessions",
-            "Unlimited Rizz Assist",
-            "Unlimited hints",
-            "Harder challenge modes",
-            "Realistic mode",
-            "Future elite characters",
-            "Faster progression",
-          ].map((b) => (
-            <li key={b} className="flex items-center gap-2">
-              <span className="w-3.5 h-3.5 rounded-full bg-amber-400/10 border border-amber-400/20 flex items-center justify-center text-amber-400 text-[8px]">
-                ✓
-              </span>
-              {b}
-            </li>
-          ))}
-        </ul>
-        <p className="text-xs text-zinc-600 mt-1">
-          Billing not yet active. User plan can be set manually in Users tab.
+      {feedback && (
+        <p className={`text-sm flex items-center gap-1.5 ${feedback.type === "success" ? "text-emerald-400" : "text-red-400"}`}>
+          {feedback.type === "success" ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+          {feedback.msg}
         </p>
-      </div>
+      )}
+
+      <Button
+        type="button"
+        disabled={saving || !draft}
+        onClick={handleSave}
+        className="bg-violet-600 hover:bg-violet-500 text-white border-0"
+        data-ocid="admin.tier_limits_save_button"
+      >
+        {saving ? "Saving…" : "Save All Tier Limits"}
+      </Button>
     </div>
   );
 }
@@ -1286,6 +1334,9 @@ export default function Admin() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2 }}
           >
+            {activeTab === "dashboard" && (
+              <DashboardTab adminToken={adminToken!} />
+            )}
             {activeTab === "users" && (
               <UsersTab
                 adminToken={adminToken!}

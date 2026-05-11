@@ -443,11 +443,12 @@ export default function Results() {
       }
     });
 
-    // Show save-progress wall for every anonymous session completion
+    // Track guest session count and store result for potential future signup.
+    // We do NOT show the signup modal here — the user gets to see their results.
+    // The signup wall appears only when they try to start a SECOND session
+    // (Try Again, Next Challenge, Resume, or pick a new challenge).
     if (!isAuthenticated) {
       incrementGuestSession();
-      // Build and store a backend-shaped SessionResult in sessionStorage so it can
-      // be merged into the new account after the user signs up via SaveProgressModal.
       const guestBackendSession: BackendSessionResult = {
         sessionId: Date.now().toString(),
         outcomeType,
@@ -470,7 +471,6 @@ export default function Results() {
         createdAt: BigInt(Date.now()),
       };
       storeGuestSessionResult(guestBackendSession);
-      setTimeout(() => setShowSaveModal(true), 1500);
     }
   }, []);
 

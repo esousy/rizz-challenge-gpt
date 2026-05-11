@@ -128,10 +128,47 @@ export const appApi = {
       { method: "DELETE" },
     );
   },
+  async adminDashboard(token: string) {
+    return request<Record<string, unknown>>(
+      `/admin/dashboard?token=${encodeURIComponent(token)}`,
+    );
+  },
+  async adminUserUsage(token: string, userId: string) {
+    return request<Record<string, unknown>>(
+      `/admin/users/${userId}/usage?token=${encodeURIComponent(token)}`,
+    );
+  },
+  async adminAiErrors(token: string, limit?: number) {
+    return request<{ errors: unknown[] }>(
+      `/admin/ai-errors?token=${encodeURIComponent(token)}&limit=${limit ?? 50}`,
+    );
+  },
   async getSettings() {
     return request<{
       settings: { freePlanConfig?: FreePlanConfig; mockMode?: boolean };
     }>("/settings");
+  },
+  async sessionsToday(token: string) {
+    return request<{ rankedSessionsUsed: number; user: ApiPublicProfile }>(
+      `/sessions/today?token=${encodeURIComponent(token)}`,
+    );
+  },
+  async checkLimit(params: { token?: string; feature: string; anonymousId?: string }) {
+    return request<{ allowed: boolean; reason: string | null; feature: string; tier: string; used: number; limit: number | null; resetAt: string; upgradeRecommended: boolean }>(
+      "/check-limit",
+      { method: "POST", body: JSON.stringify(params) },
+    );
+  },
+  async incrementUsage(params: { token?: string; feature: string; anonymousId?: string }) {
+    return request<{ ok: boolean; usage: Record<string, number>; tier: string; limits: Record<string, any> }>(
+      "/increment-usage",
+      { method: "POST", body: JSON.stringify(params) },
+    );
+  },
+  async getUsage(params: { token?: string; anonymousId?: string }) {
+    return request<{ tier: string; usage: Record<string, number>; limits: Record<string, any>; resetAt: string; user: ApiPublicProfile | null }>(
+      `/usage?${params.token ? `token=${encodeURIComponent(params.token)}` : `anonymousId=${encodeURIComponent(params.anonymousId ?? "")}`}`,
+    );
   },
   async saveSetting(token: string, key: string, value: unknown) {
     return request<{ ok: true }>("/admin/settings", {

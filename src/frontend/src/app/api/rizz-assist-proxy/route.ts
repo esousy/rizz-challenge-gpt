@@ -9,6 +9,46 @@
  */
 
 import { getOpenAIKey } from "../../server/get-openai-key.js";
+import { neon } from "@neondatabase/serverless";
+
+// ── AI Usage Logger (writes directly to Neon DB) ──────────────────────────
+const OPENAI_MODEL_PRICING: Record<string, { inputPer1MTokens: number; outputPer1MTokens: number }> = {
+  "gpt-4o-mini": { inputPer1MTokens: 0.15, outputPer1MTokens: 0.60 },
+  "gpt-4.1-mini": { inputPer1MTokens: 0.40, outputPer1MTokens: 1.60 },
+  "gpt-4.1": { inputPer1MTokens: 2.00, outputPer1MTokens: 8.00 },
+};
+
+function estimateCostUsd(model: string, promptTokens: number, completionTokens: number): number {
+  const pricing = OPENAI_MODEL_PRICING[model] ?? OPENAI_MODEL_PRICING["gpt-4o-mini"];
+  const inputCost = (promptTokens / 1_000_000) * pricing.inputPer1MTokens;
+  const outputCost = (completionTokens / 1_000_000) * pricing.outputPer1MTokens;
+  return Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000;
+}
+
+function getDbUrl(): string | undefined {
+  return process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL || process.env.NEON_DATABASE_URL;
+}
+
+function logAiUsageFireAndForget(params: {
+  requestType: string;
+  promptTokens: number;
+  completionTokens: number;
+  success: boolean;
+  errorMessage?: string;
+  userCategory?: string;
+  model?: string;
+}) {
+  const dbUrl = getDbUrl();
+  if (!dbUrl) return;
+  const model = params.model ?? "gpt-4o-mini";
+  const totalTokens = params.promptTokens + params.completionTokens;
+  const estimatedCostUsd = estimateCostUsd(model, params.promptTokens, params.completionTokens);
+  const sql = neon(dbUrl);
+  sql`
+    INSERT INTO ai_usage_logs (user_category, request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, success, error_message)
+    VALUES (${params.userCategory ?? 'anonymous'}, ${params.requestType}, ${model}, ${params.promptTokens}, ${params.completionTokens}, ${totalTokens}, ${estimatedCostUsd}, ${params.success}, ${params.errorMessage ?? null})
+  `.catch((err: unknown) => console.error("[logAiUsage] Failed:", err));
+}
 
 export interface RizzAssistProxyBody {
   conversation_history: { role: string; content: string }[];
@@ -214,7 +254,7 @@ export async function handleRizzAssistProxy(
     response_format: { type: "json_object" },
   });
 
-  async function attempt(): Promise<{ ok: boolean; content: string }> {
+  async function attempt(): Promise<{ ok: boolean; content: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }> {
     try {
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -225,7 +265,11 @@ export async function handleRizzAssistProxy(
         body: fetchBody,
       });
       const data = (await res.json()) as Record<string, unknown>;
-      if (!res.ok) return { ok: false, content: "" };
+      const usage = data?.usage as { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
+      if (!res.ok) {
+        logAiUsageFireAndForget({ requestType: "assist", promptTokens: 0, completionTokens: 0, success: false, errorMessage: `OpenAI error (${res.status})` });
+        return { ok: false, content: "" };
+      }
       const choices = data?.choices as
         | Array<Record<string, unknown>>
         | undefined;
@@ -233,8 +277,10 @@ export async function handleRizzAssistProxy(
         choices?.[0]?.message as Record<string, unknown> | undefined
       )?.content;
       const text = typeof content === "string" ? content : "";
-      return { ok: !!text, content: text };
+      if (text) logAiUsageFireAndForget({ requestType: "assist", promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0, success: true });
+      return { ok: !!text, content: text, usage };
     } catch {
+      logAiUsageFireAndForget({ requestType: "assist", promptTokens: 0, completionTokens: 0, success: false, errorMessage: "Network error" });
       return { ok: false, content: "" };
     }
   }
