@@ -61,6 +61,9 @@ export function toFrontendAdmin(profile: ApiAdminProfile) {
 }
 
 export const appApi = {
+  async health() {
+    return request<{ ok: true; databaseConfigured: boolean }>("/health");
+  },
   async signup(username: string, email: string, password: string) {
     return request<{ user: ApiPublicProfile }>("/auth/signup", {
       method: "POST",

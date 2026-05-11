@@ -107,8 +107,15 @@ export function useAdminAuth(): AdminAuthState {
       try {
         if (!actor) {
           if (token.startsWith("standalone-admin:")) {
-            setAdminToken(token);
-            setAdminProfile(createStandaloneProfile());
+            const health = await appApi.health().catch(() => null);
+            if (health?.databaseConfigured) {
+              clearAdminToken();
+              setAdminToken(null);
+              setAdminProfile(null);
+            } else {
+              setAdminToken(token);
+              setAdminProfile(createStandaloneProfile());
+            }
           } else {
             const result = await appApi.adminMe(token);
             setAdminToken(token);
@@ -158,7 +165,16 @@ export function useAdminAuth(): AdminAuthState {
             setAdminToken(result.token);
             setAdminProfile(profile);
             return {};
-          } catch {
+          } catch (err) {
+            const health = await appApi.health().catch(() => null);
+            if (health?.databaseConfigured) {
+              return {
+                error:
+                  err instanceof Error
+                    ? err.message
+                    : "Invalid username or password.",
+              };
+            }
             if (
               (normalized === STANDALONE_ADMIN.username ||
                 normalized === STANDALONE_ADMIN.email) &&

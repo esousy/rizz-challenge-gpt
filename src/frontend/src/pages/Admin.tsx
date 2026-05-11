@@ -891,6 +891,13 @@ function AppSettingsTab({
           return;
         }
       } else {
+        if (adminToken.startsWith("standalone-admin:")) {
+          setFeedback({
+            type: "error",
+            msg: "Please log out and log in again to save settings.",
+          });
+          return;
+        }
         await appApi.saveSetting(adminToken, "freePlanConfig", draft);
       }
       setConfig({ ...draft });
