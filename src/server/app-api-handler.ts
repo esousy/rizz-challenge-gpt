@@ -597,9 +597,9 @@ async function route(req: any, res: any) {
         sql`SELECT count(*)::int as count FROM users WHERE created_at >= ${sinceISO}`,
         sql`SELECT count(DISTINCT user_id)::int as count FROM ai_usage_logs WHERE created_at >= ${sinceISO} AND user_id IS NOT NULL`,
         sql`SELECT count(*)::int as count FROM chat_sessions WHERE created_at >= ${sinceISO}`,
-        sql`SELECT count(*)::int as calls, coalesce(sum(total_tokens),0)::bigint as tokens, coalesce(sum(estimated_cost_usd),0)::numeric as cost FROM ai_usage_logs WHERE created_at >= ${sinceISO}`,
-        sql`SELECT user_category, count(*)::int as calls, coalesce(sum(total_tokens),0)::bigint as tokens, coalesce(sum(estimated_cost_usd),0)::numeric as cost FROM ai_usage_logs WHERE created_at >= ${sinceISO} GROUP BY user_category`,
-        sql`SELECT request_type, count(*)::int as calls, coalesce(sum(estimated_cost_usd),0)::numeric as cost FROM ai_usage_logs WHERE created_at >= ${sinceISO} GROUP BY request_type`,
+        sql`SELECT count(*)::int as calls, coalesce(sum(total_tokens),0)::bigint as tokens, coalesce(sum(estimated_cost_usd),0)::numeric as cost FROM ai_usage_logs WHERE created_at >= ${sinceISO} AND request_type != 'hint'`,
+        sql`SELECT user_category, count(*)::int as calls, coalesce(sum(total_tokens),0)::bigint as tokens, coalesce(sum(estimated_cost_usd),0)::numeric as cost FROM ai_usage_logs WHERE created_at >= ${sinceISO} AND request_type != 'hint' GROUP BY user_category`,
+        sql`SELECT request_type, count(*)::int as calls, coalesce(sum(estimated_cost_usd),0)::numeric as cost FROM ai_usage_logs WHERE created_at >= ${sinceISO} AND request_type != 'hint' GROUP BY request_type`,
         sql`SELECT coalesce(sum(monthly_revenue_usd),0)::numeric as revenue FROM users WHERE plan = 'pro'`,
       ]);
       const totalCost = Number(aiStats[0]?.cost ?? 0);
@@ -609,6 +609,7 @@ async function route(req: any, res: any) {
         activeUsers: activeUsers[0]?.count ?? 0,
         rankedSessions: rankedSessions[0]?.count ?? 0,
         aiCalls: aiStats[0]?.calls ?? 0,
+        hintsUsed: (await sql`SELECT count(*)::int as count FROM ai_usage_logs WHERE created_at >= ${sinceISO} AND request_type = 'hint'`)[0]?.count ?? 0,
         totalTokens: Number(aiStats[0]?.tokens ?? 0),
         estimatedCost: totalCost,
         estimatedRevenue: totalRevenue,

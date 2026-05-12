@@ -205,6 +205,7 @@ function DashboardTab({ adminToken }: { adminToken: string }) {
           <MetricCard label="Active Users" value={fmt(metrics.activeUsers)} />
           <MetricCard label="Ranked Sessions" value={fmt(metrics.rankedSessions)} />
           <MetricCard label="AI Calls" value={fmt(metrics.aiCalls)} />
+          <MetricCard label="Hints" value={fmt(metrics.hintsUsed)} />
           <MetricCard label="Total Tokens" value={fmt(metrics.totalTokens)} />
           <MetricCard label="AI Cost" value={fmtUsd(metrics.estimatedCost)} />
           <MetricCard label="Revenue" value={fmtUsd(metrics.estimatedRevenue)} />
