@@ -134,6 +134,8 @@ export function AssistanceToolbar({
   characterProfile,
   sessionPhase,
   messages = [],
+  userId,
+  userCategory,
 }: Props) {
   const [openerOpen, setOpenerOpen] = useState(false);
   const [hintOpen, setHintOpen] = useState(false);
