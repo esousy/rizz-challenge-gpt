@@ -9,6 +9,7 @@ import {
   SaveProgressModal,
 } from "@/components/SaveProgressModal";
 import { TypingIndicator } from "@/components/TypingIndicator";
+import { AuthModal } from "@/components/AuthModal";
 import { UpgradeModal } from "@/components/UpgradeModal";
 import { useAssistance } from "@/hooks/use-assistance";
 import { useAuth } from "@/hooks/use-auth";
@@ -295,15 +296,22 @@ export default function Challenge() {
       .catch(() => {});
   }, [backendActor, actorFetching]);
 
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
   // Mirror upgrade modal signals from assistance hook
   // biome-ignore lint/correctness/useExhaustiveDependencies: stable clearUpgradeModal ref
   useEffect(() => {
     if (assistance.shouldShowUpgradeModal && assistance.upgradeModalTrigger) {
-      setUpgradeTrigger(assistance.upgradeModalTrigger);
-      setShowUpgradeModal(true);
+      if (!isAuthenticated) {
+        // Anonymous user — show sign up/sign in modal instead of upgrade
+        setShowAuthModal(true);
+      } else {
+        setUpgradeTrigger(assistance.upgradeModalTrigger);
+        setShowUpgradeModal(true);
+      }
       assistance.dismissUpgradeModal();
     }
-  }, [assistance.shouldShowUpgradeModal, assistance.upgradeModalTrigger]);
+  }, [assistance.shouldShowUpgradeModal, assistance.upgradeModalTrigger, isAuthenticated]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -565,9 +573,17 @@ export default function Challenge() {
         </div>
       )}
 
+      {/* Auth modal — shown when anonymous user hits a hint/assist limit */}
+      <AuthModal
+        isVisible={showAuthModal}
+        initialTab="signup"
+        onDismiss={() => setShowAuthModal(false)}
+        onSuccess={() => setShowAuthModal(false)}
+      />
+
       {/* Upgrade modal — shown when free user hits a plan limit */}
       <UpgradeModal
-        isOpen={showUpgradeModal}
+        isOpen={showUpgradeModal && isAuthenticated}
         trigger={upgradeModalTrigger}
         onClose={() => setShowUpgradeModal(false)}
       />
