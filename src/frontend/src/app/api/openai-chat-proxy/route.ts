@@ -44,6 +44,7 @@ function logAiUsageFireAndForget(params: {
   errorMessage?: string;
   challengeId?: string;
   userCategory?: string;
+  userId?: string | null;
   model?: string;
 }) {
   const dbUrl = getDbUrl();
@@ -53,8 +54,8 @@ function logAiUsageFireAndForget(params: {
   const estimatedCostUsd = estimateCostUsd(model, params.promptTokens, params.completionTokens);
   const sql = neon(dbUrl);
   sql`
-    INSERT INTO ai_usage_logs (user_category, request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, success, error_message)
-    VALUES (${params.userCategory ?? 'anonymous'}, ${params.requestType}, ${model}, ${params.promptTokens}, ${params.completionTokens}, ${totalTokens}, ${estimatedCostUsd}, ${params.success}, ${params.errorMessage ?? null})
+    INSERT INTO ai_usage_logs (user_id, user_category, request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, success, error_message)
+    VALUES (${params.userId ?? null}, ${params.userCategory ?? 'anonymous'}, ${params.requestType}, ${model}, ${params.promptTokens}, ${params.completionTokens}, ${totalTokens}, ${estimatedCostUsd}, ${params.success}, ${params.errorMessage ?? null})
   `.catch((err: unknown) => console.error("[logAiUsage] Failed:", err));
 }
 
@@ -68,6 +69,8 @@ export interface ChatProxyBody {
   conversation_history: { role: string; content: string }[];
   character_profile: Record<string, unknown>;
   user_message: string;
+  user_category?: string;
+  user_id?: string;
 }
 
 export interface ChatProxyResponse {
@@ -90,6 +93,8 @@ export interface ChatProxyResponse {
 async function callOpenAI(
   apiKey: string,
   messages: { role: string; content: string }[],
+  userCategory?: string,
+  userId?: string | null,
 ): Promise<{ ok: boolean; content: string; error?: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }> {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -120,7 +125,7 @@ async function callOpenAI(
             ? "Rate limit reached"
             : `OpenAI error (${res.status})`;
     // Log failed call
-    logAiUsageFireAndForget({ requestType: "normal_chat", promptTokens: 0, completionTokens: 0, success: false, errorMessage: msg });
+    logAiUsageFireAndForget({ requestType: "normal_chat", promptTokens: 0, completionTokens: 0, success: false, errorMessage: msg, userCategory, userId });
     return { ok: false, content: "", error: msg };
   }
 
@@ -129,18 +134,18 @@ async function callOpenAI(
   const text = typeof content === "string" ? content : "";
   const usage = data?.usage as { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
   if (!text) {
-    logAiUsageFireAndForget({ requestType: "normal_chat", promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0, success: false, errorMessage: "Empty response from OpenAI" });
+    logAiUsageFireAndForget({ requestType: "normal_chat", promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0, success: false, errorMessage: "Empty response from OpenAI", userCategory, userId });
     return { ok: false, content: "", error: "Empty response from OpenAI" };
   }
   // Log successful call
-  logAiUsageFireAndForget({ requestType: "normal_chat", promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0, success: true });
+  logAiUsageFireAndForget({ requestType: "normal_chat", promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0, success: true, userCategory, userId });
   return { ok: true, content: text, usage };
 }
 
 export async function handleChatProxy(
   body: ChatProxyBody,
 ): Promise<{ status: number; json: ChatProxyResponse | { error: string } }> {
-  const apiKey = await getOpenAIKey();
+  const apiKey = process.env.OPENAI_API_KEY || await getOpenAIKey();
   if (!apiKey) {
     return {
       status: 503,
@@ -170,10 +175,10 @@ export async function handleChatProxy(
   ];
 
   // First attempt
-  let result = await callOpenAI(apiKey, messages);
+  let result = await callOpenAI(apiKey, messages, body.user_category, body.user_id);
   if (!result.ok) {
     // Retry once
-    result = await callOpenAI(apiKey, messages);
+    result = await callOpenAI(apiKey, messages, body.user_category, body.user_id);
   }
 
   if (!result.ok || !result.content) {

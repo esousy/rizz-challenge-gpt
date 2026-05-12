@@ -221,11 +221,13 @@ export interface SessionResult {
 export interface AssistanceState {
   openersUsed: boolean;
   hintsUsed: number;
-  assistUsed: number;
-  /** Unix ms timestamp after which another hint may be used, or null if no cooldown */
-  hintsCooldownUntil: number | null;
-  /** Unix ms timestamp after which another assist may be used, or null if no cooldown */
-  assistCooldownUntil: number | null;
+  hintsLimit: number | null;
+  hintsRemaining: number;
+  hasHints: boolean;
+  assistsUsed: number;
+  assistsLimit: number | null;
+  assistsRemaining: number;
+  hasAssists: boolean;
 }
 
 // ── Resume Mode ───────────────────────────────────────────────────────────────

@@ -36,6 +36,7 @@ function logAiUsageFireAndForget(params: {
   success: boolean;
   errorMessage?: string;
   userCategory?: string;
+  userId?: string | null;
   model?: string;
 }) {
   const dbUrl = getDbUrl();
@@ -45,8 +46,8 @@ function logAiUsageFireAndForget(params: {
   const estimatedCostUsd = estimateCostUsd(model, params.promptTokens, params.completionTokens);
   const sql = neon(dbUrl);
   sql`
-    INSERT INTO ai_usage_logs (user_category, request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, success, error_message)
-    VALUES (${params.userCategory ?? 'anonymous'}, ${params.requestType}, ${model}, ${params.promptTokens}, ${params.completionTokens}, ${totalTokens}, ${estimatedCostUsd}, ${params.success}, ${params.errorMessage ?? null})
+    INSERT INTO ai_usage_logs (user_id, user_category, request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, success, error_message)
+    VALUES (${params.userId ?? null}, ${params.userCategory ?? 'anonymous'}, ${params.requestType}, ${model}, ${params.promptTokens}, ${params.completionTokens}, ${totalTokens}, ${estimatedCostUsd}, ${params.success}, ${params.errorMessage ?? null})
   `.catch((err: unknown) => console.error("[logAiUsage] Failed:", err));
 }
 
@@ -201,7 +202,8 @@ export async function handleRizzAssistProxy(
   status: number;
   json: RizzAssistProxyResponse | { error: string };
 }> {
-  const apiKey = await getOpenAIKey();
+  // In Vercel serverless, read directly from env var
+  const apiKey = process.env.OPENAI_API_KEY || await getOpenAIKey();
   if (!apiKey) {
     // Return context-aware fallback rather than error
     const fb =
@@ -254,6 +256,9 @@ export async function handleRizzAssistProxy(
     response_format: { type: "json_object" },
   });
 
+  const userCategory = (body as any)?.user_category ?? "anonymous";
+  const userId = (body as any)?.user_id ?? null;
+
   async function attempt(): Promise<{ ok: boolean; content: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }> {
     try {
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -267,7 +272,7 @@ export async function handleRizzAssistProxy(
       const data = (await res.json()) as Record<string, unknown>;
       const usage = data?.usage as { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
       if (!res.ok) {
-        logAiUsageFireAndForget({ requestType: "assist", promptTokens: 0, completionTokens: 0, success: false, errorMessage: `OpenAI error (${res.status})` });
+        logAiUsageFireAndForget({ requestType: "assist", promptTokens: 0, completionTokens: 0, success: false, errorMessage: `OpenAI error (${res.status})`, userCategory: userCategory, userId: userId });
         return { ok: false, content: "" };
       }
       const choices = data?.choices as
@@ -277,10 +282,10 @@ export async function handleRizzAssistProxy(
         choices?.[0]?.message as Record<string, unknown> | undefined
       )?.content;
       const text = typeof content === "string" ? content : "";
-      if (text) logAiUsageFireAndForget({ requestType: "assist", promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0, success: true });
+      if (text) logAiUsageFireAndForget({ requestType: "assist", promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0, success: true, userCategory: userCategory, userId: userId });
       return { ok: !!text, content: text, usage };
     } catch {
-      logAiUsageFireAndForget({ requestType: "assist", promptTokens: 0, completionTokens: 0, success: false, errorMessage: "Network error" });
+      logAiUsageFireAndForget({ requestType: "assist", promptTokens: 0, completionTokens: 0, success: false, errorMessage: "Network error", userCategory: userCategory, userId: userId });
       return { ok: false, content: "" };
     }
   }

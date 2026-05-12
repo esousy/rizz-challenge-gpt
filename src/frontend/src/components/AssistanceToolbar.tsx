@@ -40,6 +40,10 @@ interface Props {
   sessionPhase: SessionPhase;
   /** Full message array passed through to AssistModal for context */
   messages?: Message[];
+  /** Authenticated user ID — passed to the assist proxy so AI usage is logged per-user */
+  userId?: string | null;
+  /** User tier for usage logging */
+  userCategory?: string;
 }
 
 // ── Sub-component: single toolbar button ──────────────────────────────────────
@@ -143,14 +147,15 @@ export function AssistanceToolbar({
   if (sessionComplete && !isResumeMode) return null;
 
   const showOpeners = isUserLedMode && !isResumeMode;
-  const openerUsed = assistance.openerLimitReached;
+  const openerUsed = assistance.state.openersUsed;
+  const canUseOpeners = !openerUsed && conversationLength === 0;
   const openerDisabled = openerUsed || conversationLength > 0;
 
   // Assist disabled in round 1, but NOT in resume mode (which stays at round 1 forever)
   const assistDisabledByRound = !isResumeMode && roundNumber <= 1;
 
   const handleOpenerClick = () => {
-    if (!assistance.canUseOpeners || conversationLength > 0) return;
+    if (!canUseOpeners || conversationLength > 0) return;
     setOpenerOpen(true);
   };
 
@@ -159,28 +164,25 @@ export function AssistanceToolbar({
     onSelectOpener(text);
   };
 
-  const handleHintClick = () => {
-    // consumeHint handles upgrade modal signaling if limit reached for free users
+  const handleHintClick = async () => {
+    const result = await assistance.consumeHint();
+    if (!result.allowed) return; // Upgrade modal triggered
+
     const hint = getContextualHint(
       interestLevel,
       currentMood,
       roundNumber,
       conversationLength,
     );
-    const used = assistance.consumeHint();
-    if (used) {
-      setActiveHint(hint);
-      setHintOpen(true);
-      onHintReceived(hint);
-    }
-    // If not used, consumeHint already set upgradeModalTrigger on the hook
+    setActiveHint(hint);
+    setHintOpen(true);
+    onHintReceived(hint);
   };
 
   const handleAssistClick = async () => {
     if (assistDisabledByRound) return;
-    // consumeAssist handles upgrade modal signaling if limit reached for free users
-    const used = assistance.consumeAssist();
-    if (!used) return; // Either on cooldown or upgrade modal triggered
+    const limitResult = await assistance.consumeAssist();
+    if (!limitResult.allowed) return;
 
     setAssistSuggestions(null);
     setIsLoadingAssist(true);
@@ -190,8 +192,7 @@ export function AssistanceToolbar({
       const lastAIMsg =
         [...messages].reverse().find((m) => m.role === "ai")?.content ?? "";
 
-      // Call the server-side proxy — no API key needed from the client
-      const result = await fetchRizzAssistSuggestions({
+      const suggestions = await fetchRizzAssistSuggestions({
         conversationHistory: messages,
         lastAIMessage: lastAIMsg,
         characterProfile,
@@ -200,10 +201,12 @@ export function AssistanceToolbar({
         momentum: currentMomentum,
         challengeType: challengeId,
         conversationPhase: sessionPhase,
+        userId,
+        userCategory,
       });
-      setAssistSuggestions(result);
-    } catch {
-      // On error, use context-aware local fallback
+      setAssistSuggestions(suggestions);
+    } catch (err) {
+      console.error("[Assist] Proxy call failed, using local fallback:", err);
       const fallback = buildLocalFallback(
         currentMood,
         interestLevel,
@@ -244,8 +247,8 @@ export function AssistanceToolbar({
           label="Hint"
           icon="💡"
           disabled={false}
-          limitReached={assistance.hintLimitReached}
-          cooldownSecs={assistance.hintCooldownSecsRemaining}
+          limitReached={!assistance.state.hasHints}
+          cooldownSecs={0}
           onClick={handleHintClick}
           data-ocid="assistance.hint_button"
         />
@@ -255,8 +258,8 @@ export function AssistanceToolbar({
           label="Assist"
           icon="🔥"
           disabled={assistDisabledByRound || isLoadingAssist}
-          limitReached={assistance.assistLimitReached}
-          cooldownSecs={assistance.assistCooldownSecsRemaining}
+          limitReached={!assistance.state.hasAssists}
+          cooldownSecs={0}
           onClick={() => {
             void handleAssistClick();
           }}
@@ -265,22 +268,22 @@ export function AssistanceToolbar({
 
         {/* Subtle usage indicator on right */}
         <div className="ml-auto flex items-center gap-3 pr-1">
-          {!assistance.hintLimitReached && (
+          {!!assistance.state.hasHints && (
             <span
               className="text-[9px] text-[oklch(0.35_0_0)] tabular-nums"
               aria-hidden="true"
             >
               💡{assistance.state.hintsUsed}/
-              {assistance.isPro ? "∞" : assistance.hintsLimit}
+              {assistance.state.hintsLimit === null ? "∞" : assistance.state.hintsLimit}
             </span>
           )}
-          {!assistance.assistLimitReached && (
+          {!!assistance.state.hasAssists && (
             <span
               className="text-[9px] text-[oklch(0.35_0_0)] tabular-nums"
               aria-hidden="true"
             >
-              🔥{assistance.state.assistUsed}/
-              {assistance.isPro ? "∞" : assistance.assistLimit}
+              🔥{assistance.state.assistsUsed}/
+              {assistance.state.hintsLimit === null ? "∞" : assistance.state.assistsLimit}
             </span>
           )}
         </div>

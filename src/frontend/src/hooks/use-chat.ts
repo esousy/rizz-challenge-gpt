@@ -19,6 +19,7 @@ import type {
 } from "@/types";
 import { useActor } from "@caffeineai/core-infrastructure";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAuth } from "./use-auth";
 
 const MAX_ROUNDS = 5;
 const TYPING_DELAY_MS = 1000;
@@ -130,9 +131,25 @@ export function useChat(
       momentum: string;
     }[]
   >([]);
+  // User context refs — set from auth state for proxy logging
+  const userCategoryRef = useRef<string>("anonymous");
+  const userIdRef = useRef<string | null>(null);
 
   // Expose mock mode so consumers can display the indicator
   const mockMode = isMockMode;
+
+  // Set user context refs from auth state
+  const auth = useAuth();
+  useEffect(() => {
+    if (auth.isAuthenticated && auth.user) {
+      const plan = (auth.user as any).plan ?? 'free';
+      userCategoryRef.current = plan === 'pro' ? 'pro' : 'free';
+      userIdRef.current = (auth.user as any).id ?? null;
+    } else {
+      userCategoryRef.current = 'anonymous';
+      userIdRef.current = null;
+    }
+  }, [auth.isAuthenticated, auth.user]);
 
   // Live key is active when not in mock mode — the OpenAI key is configured
   // server-side via Vercel env var (OPENAI_API_KEY), never exposed to the browser.
@@ -221,6 +238,8 @@ export function useChat(
               content: m.content,
             })),
             character_profile: getCharacterProfile(challengeId),
+            userCategory: userCategoryRef.current ?? "anonymous",
+            userId: userIdRef.current ?? null,
           };
 
           const { response: proxyResponse, error: proxyError } =

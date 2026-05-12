@@ -215,6 +215,8 @@ export async function callChatProxy(
     })),
     character_profile: req.character_profile,
     user_message: userMessage,
+    user_category: req.userCategory ?? "anonymous",
+    user_id: req.userId ?? null,
   };
 
   try {

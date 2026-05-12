@@ -661,6 +661,7 @@ async function route(req: any, res: any) {
         assistsToday: todayAssists[0]?.count ?? 0,
         totalAssists,
         chatCallsToday: todayChat[0]?.count ?? 0,
+        totalChatCalls: (await sql`SELECT count(*)::int as count FROM ai_usage_logs WHERE user_id = ${userId} AND request_type = 'normal_chat'`)[0]?.count ?? 0,
         totalAiCalls: aiUsage[0]?.calls ?? 0,
         totalTokens: Number(aiUsage[0]?.tokens ?? 0),
         estimatedCost: estCost,
@@ -757,6 +758,13 @@ async function route(req: any, res: any) {
       } else if (feature === "ai_call") {
         await sql`INSERT INTO user_daily_usage (identity_key, anonymous_id, user_tier, usage_date, ai_calls) VALUES (${'a:' + anonId}, ${anonId}, 'anonymous', ${today}, 1) ON CONFLICT (identity_key, usage_date) DO UPDATE SET ai_calls = user_daily_usage.ai_calls + 1, updated_at = now()`;
       }
+    }
+
+    // Also log to ai_usage_logs for dashboard cost tracking
+    // Hints are local (0 tokens, 0 cost), assists/chat use OpenAI (logged separately by proxy)
+    if (feature === 'hint') {
+      await sql`INSERT INTO ai_usage_logs (user_id, user_category, request_type, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, success)
+        VALUES (${user?.id ?? null}, ${tier}, 'hint', 'local', 0, 0, 0, 0, true)`.catch(() => {});
     }
 
     const usage = await getTodayUsage(user?.id ?? null, !user ? String(anonymousId ?? "") : null);

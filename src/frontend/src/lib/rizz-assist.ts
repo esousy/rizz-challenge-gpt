@@ -29,6 +29,8 @@ export interface RizzAssistParams {
   momentum: string;
   challengeType: string;
   conversationPhase: SessionPhase;
+  userCategory?: string;
+  userId?: string | null;
   /** @deprecated Key is no longer needed — proxy handles auth server-side */
   apiKey?: string;
 }
@@ -106,6 +108,8 @@ async function callRizzAssistProxy(
     momentum: params.momentum,
     challenge_type: params.challengeType,
     conversation_phase: params.conversationPhase,
+    user_category: params.userCategory ?? "anonymous",
+    user_id: params.userId ?? null,
   };
 
   try {
@@ -128,9 +132,10 @@ async function callRizzAssistProxy(
       typeof data.smooth === "string" && data.smooth.trim()
         ? data.smooth.trim()
         : null;
-    if (!playful || !bold || !smooth) return null;
-    return { playful, bold, smooth };
-  } catch {
+    if (!playful && !bold && !smooth) return null;
+    return { playful: playful || bold || smooth || '', bold: bold || playful || smooth || '', smooth: smooth || bold || playful || '' };
+  } catch (err) {
+    console.error("[callRizzAssistProxy] Error:", err);
     return null;
   }
 }

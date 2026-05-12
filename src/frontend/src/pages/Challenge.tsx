@@ -301,7 +301,7 @@ export default function Challenge() {
     if (assistance.shouldShowUpgradeModal && assistance.upgradeModalTrigger) {
       setUpgradeTrigger(assistance.upgradeModalTrigger);
       setShowUpgradeModal(true);
-      assistance.clearUpgradeModal();
+      assistance.dismissUpgradeModal();
     }
   }, [assistance.shouldShowUpgradeModal, assistance.upgradeModalTrigger]);
 
@@ -324,7 +324,7 @@ export default function Challenge() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset once on mount for new sessions
   useEffect(() => {
     if (!isResumeMode) {
-      assistance.resetAssistance();
+      assistance.refreshUsage();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -605,6 +605,8 @@ export default function Challenge() {
         characterProfile={characterProfile}
         sessionPhase={sessionPhase}
         messages={messages}
+        userId={auth.user?.id ?? null}
+        userCategory={isPro ? "pro" : isAuthenticated ? "free" : "anonymous"}
       />
 
       <ChatInput
