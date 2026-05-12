@@ -138,6 +138,7 @@ async function callRizzAssistProxy(
     console.error("[callRizzAssistProxy] Error:", err);
     return null;
   }
+  console.log("[callRizzAssistProxy] Response:", { playful: data?.playful, bold: data?.bold, smooth: data?.smooth });
 }
 
 /**
