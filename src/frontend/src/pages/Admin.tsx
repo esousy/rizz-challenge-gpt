@@ -1470,7 +1470,7 @@ export default function Admin() {
             )}
             {activeTab === "payments" && (
               <PaymentsTab adminToken={adminToken!} />
-            )}}
+            )}
             {activeTab === "app-settings" && (
               <AppSettingsTab
                 adminToken={adminToken!}
