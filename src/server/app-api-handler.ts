@@ -817,6 +817,7 @@ async function route(req: any, res: any) {
 
   // ── Whop Checkout ──────────────────────────────────────────────────────
   if (req.method === "POST" && path === "/whop-checkout") {
+    const body = req.body ?? {};
     const { userId, email } = body;
     if (!userId || !email) return error(res, 400, "userId and email required");
 
@@ -844,6 +845,7 @@ async function route(req: any, res: any) {
 
   // ── Whop Webhook ─────────────────────────────────────────────────────────
   if (req.method === "POST" && path === "/whop-webhook") {
+    const body = req.body ?? {};
     const eventType = body?.event ?? body?.type;
     const data = body?.data ?? body;
     console.log(`[whop-webhook] Received: ${eventType}`);
