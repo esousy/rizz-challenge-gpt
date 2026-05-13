@@ -822,26 +822,11 @@ async function route(req: any, res: any) {
     const { userId, email } = body;
     if (!userId || !email) return error(res, 400, "userId and email required");
 
-    const whopKey = process.env.WHOP_API_KEY ?? "";
+    // Use direct checkout link with metadata passed as URL params
+    // Whop will include these in webhook payloads
     const planId = process.env.WHOP_PRO_PLAN_ID ?? "plan_Dxtf7y0t3JZUA";
-    if (!whopKey) return error(res, 500, "Whop not configured");
-
-    try {
-      const whopRes = await fetch("https://api.whop.com/api/v2/checkouts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${whopKey}` },
-        body: JSON.stringify({ plan_id: planId, metadata: { user_id: userId, email } }),
-      });
-      const whopData = await whopRes.json() as any;
-      if (!whopRes.ok) {
-        console.error("[whop-checkout] Error:", JSON.stringify(whopData));
-        return res.status(500).json({ error: "Failed to create checkout", details: whopData });
-      }
-      return res.status(200).json({ url: whopData.checkout_url ?? whopData.url });
-    } catch (err) {
-      console.error("[whop-checkout] Error:", err);
-      return error(res, 500, "Checkout failed");
-    }
+    const checkoutUrl = `https://whop.com/checkout/${planId}?metadata[user_id]=${encodeURIComponent(userId)}&metadata[email]=${encodeURIComponent(email)}`;
+    return res.status(200).json({ url: checkoutUrl });
   }
 
   // ── Whop Webhook ─────────────────────────────────────────────────────────
