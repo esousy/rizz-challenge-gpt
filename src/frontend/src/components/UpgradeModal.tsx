@@ -7,7 +7,6 @@ import type { UpgradeModalTrigger } from "@/types";
  *
  * Clicking "Upgrade to Pro" creates a Whop checkout session and redirects.
  */
-import { useAuth } from "@/hooks/use-auth";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 
@@ -15,6 +14,8 @@ interface Props {
   isOpen: boolean;
   trigger?: UpgradeModalTrigger | null;
   onClose: () => void;
+  userId?: string;
+  userEmail?: string;
 }
 
 const TRIGGER_COPY: Record<
@@ -35,19 +36,18 @@ const TRIGGER_COPY: Record<
   },
 };
 
-export function UpgradeModal({ isOpen, trigger, onClose }: Props) {
+export function UpgradeModal({ isOpen, trigger, onClose, userId, userEmail }: Props) {
   const copy = trigger ? TRIGGER_COPY[trigger] : null;
-  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
 
   async function handleUpgrade() {
-    if (!user) return;
+    if (!userId || !userEmail) return;
     setLoading(true);
     try {
       const res = await fetch("/api/app/whop-checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, email: user.email }),
+        body: JSON.stringify({ userId, email: userEmail }),
       });
       const data = await res.json() as { url?: string; error?: string };
       if (data.url) {
@@ -159,7 +159,7 @@ export function UpgradeModal({ isOpen, trigger, onClose }: Props) {
                   data-ocid="upgrade_modal.cta_button"
                   className="w-full h-12 rounded-2xl bg-gradient-to-r from-[oklch(0.65_0.22_280)] to-[oklch(0.6_0.26_310)] text-white font-display font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-60"
                   onClick={handleUpgrade}
-                  disabled={loading || !user}
+                  disabled={loading || !userId}
                 >
                   {loading ? (
                     <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />

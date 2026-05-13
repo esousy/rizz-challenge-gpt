@@ -570,6 +570,8 @@ export default function Challenge() {
         isOpen={showUpgradeModal}
         trigger={upgradeModalTrigger}
         onClose={() => setShowUpgradeModal(false)}
+        userId={auth.user?.id}
+        userEmail={auth.user?.email}
       />
 
       {/* Signup gate — shown when anonymous user clicks Keep Talking */}
