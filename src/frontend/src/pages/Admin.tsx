@@ -1126,6 +1126,116 @@ function AppSettingsTab({
 
 // ── Coming Soon Tab ────────────────────────────────────────────────────────────
 
+function PaymentsTab({ adminToken }: { adminToken: string }) {
+  const [data, setData] = useState<{ payments: any[]; stats: { total: number; revenue: number; paymentCount: number } } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    setLoading(true);
+    appApi.adminPayments(adminToken)
+      .then((d) => setData(d as any))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [adminToken]);
+
+  if (loading) return <div className="text-zinc-500 text-sm p-4">Loading payments...</div>;
+  if (!data) return <div className="text-zinc-500 text-sm p-4">Failed to load payments.</div>;
+
+  const fmtUsd = (n: number) => n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`;
+  const filtered = search.trim()
+    ? data.payments.filter((p: any) =>
+        (p.username ?? "").toLowerCase().includes(search.toLowerCase()) ||
+        (p.email ?? "").toLowerCase().includes(search.toLowerCase()) ||
+        (p.whopPaymentId ?? "").toLowerCase().includes(search.toLowerCase())
+      )
+    : data.payments;
+
+  return (
+    <div className="flex flex-col gap-5 max-w-5xl">
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl py-3 px-2 flex flex-col items-center gap-0.5">
+          <span className="text-xl font-bold text-white">{data.stats.total}</span>
+          <span className="text-[10px] text-zinc-500">Total Events</span>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl py-3 px-2 flex flex-col items-center gap-0.5">
+          <span className="text-xl font-bold text-emerald-400">{data.stats.paymentCount}</span>
+          <span className="text-[10px] text-zinc-500">Payments</span>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl py-3 px-2 flex flex-col items-center gap-0.5">
+          <span className="text-xl font-bold text-emerald-400">{fmtUsd(data.stats.revenue)}</span>
+          <span className="text-[10px] text-zinc-500">Revenue</span>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="relative">
+        <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search username, email, or payment ID..."
+          className="w-full h-10 pl-9 pr-4 rounded-xl bg-zinc-900 border border-zinc-700 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-violet-500 transition-colors"
+        />
+      </div>
+
+      {/* Table */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase">
+              <th className="px-4 py-3 text-left">Date</th>
+              <th className="px-4 py-3 text-left">User</th>
+              <th className="px-4 py-3 text-left">Email</th>
+              <th className="px-4 py-3 text-left">Event</th>
+              <th className="px-4 py-3 text-right">Amount</th>
+              <th className="px-4 py-3 text-left">Status</th>
+              <th className="px-4 py-3 text-left">Card</th>
+              <th className="px-4 py-3 text-left">Method</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((p: any, i: number) => (
+              <tr key={i} className="border-b border-zinc-800/50">
+                <td className="px-4 py-2.5 text-zinc-400 whitespace-nowrap">{new Date(p.createdAt).toLocaleString()}</td>
+                <td className="px-4 py-2.5 text-white font-medium">{p.username ?? <span className="text-zinc-600">anon</span>}</td>
+                <td className="px-4 py-2.5 text-zinc-400">{p.email ?? "-"}</td>
+                <td className="px-4 py-2.5">
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                    p.eventType === "payment.succeeded" ? "bg-emerald-400/15 border-emerald-400/30 text-emerald-400" :
+                    p.eventType === "membership.activated" ? "bg-violet-400/15 border-violet-400/30 text-violet-400" :
+                    p.eventType === "membership.deactivated" ? "bg-red-400/15 border-red-400/30 text-red-400" :
+                    "bg-zinc-700/40 border-zinc-600/40 text-zinc-400"
+                  }`}>
+                    {p.eventType.replace(/\./g, " ")}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-right font-semibold text-emerald-400">{p.amount > 0 ? fmtUsd(p.amount) : "-"}</td>
+                <td className="px-4 py-2.5">
+                  <span className={`text-[10px] font-semibold uppercase ${
+                    p.status === "paid" || p.status === "trialing" ? "text-emerald-400" :
+                    p.status === "active" ? "text-violet-400" :
+                    "text-zinc-400"
+                  }`}>
+                    {p.status}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-zinc-400">{p.cardBrand ? `${p.cardBrand} ••${p.cardLast4}` : "-"}</td>
+                <td className="px-4 py-2.5 text-zinc-400 capitalize">{p.paymentMethod ?? "-"}</td>
+              </tr>
+            ))}
+            {filtered.length === 0 && (
+              <tr><td colSpan={8} className="px-4 py-8 text-zinc-600 text-center">No payments yet</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ComingSoonTab({
   label,
   icon,
@@ -1359,8 +1469,8 @@ export default function Admin() {
               <ComingSoonTab label="Characters" icon={<Layers size={22} />} />
             )}
             {activeTab === "payments" && (
-              <ComingSoonTab label="Payments" icon={<CreditCard size={22} />} />
-            )}
+              <PaymentsTab adminToken={adminToken!} />
+            )}}
             {activeTab === "app-settings" && (
               <AppSettingsTab
                 adminToken={adminToken!}

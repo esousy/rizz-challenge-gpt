@@ -143,6 +143,14 @@ export const appApi = {
       `/admin/ai-errors?token=${encodeURIComponent(token)}&limit=${limit ?? 50}`,
     );
   },
+  async adminPayments(token: string, limit?: number, offset?: number) {
+    return request<{
+      payments: any[];
+      stats: { total: number; revenue: number; paymentCount: number };
+    }>(
+      `/admin/payments?token=${encodeURIComponent(token)}&limit=${limit ?? 100}&offset=${offset ?? 0}`,
+    );
+  },
   async getSettings() {
     return request<{
       settings: { freePlanConfig?: FreePlanConfig; mockMode?: boolean };

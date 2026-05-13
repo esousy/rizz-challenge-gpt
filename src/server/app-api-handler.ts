@@ -838,50 +838,122 @@ async function route(req: any, res: any) {
 
     const planId = process.env.WHOP_PRO_PLAN_ID ?? "plan_Dxtf7y0t3JZUA";
 
-    if (eventType === "membership.activated" || eventType === "payment.succeeded") {
-      const userId = data?.metadata?.user_id ?? null;
-      // Email can be at data.user.email (payment) or data.member.email (membership)
-      const email = data?.user?.email ?? data?.member?.email ?? null;
-      const whopPlanId = data?.plan?.id ?? data?.plan_id ?? null;
+    // Ensure payments table exists
+    await sql`CREATE TABLE IF NOT EXISTS payments (
+      id serial primary key,
+      whop_payment_id text unique,
+      whop_membership_id text,
+      user_id uuid references users(id) on delete set null,
+      user_email text,
+      whop_user_id text,
+      amount_usd numeric(10,2) not null default 0,
+      currency text default 'usd',
+      status text not null default 'pending',
+      plan_id text,
+      product_id text,
+      card_brand text,
+      card_last4 text,
+      payment_method text,
+      event_type text not null,
+      raw_payload jsonb,
+      created_at timestamptz not null default now()
+    )`.catch(() => {});
+    await sql`CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)`.catch(() => {});
+    await sql`CREATE INDEX IF NOT EXISTS idx_payments_whop_payment_id ON payments(whop_payment_id)`.catch(() => {});
 
+    // Store payment event
+    const whopPaymentId = data?.id ?? null;
+    const whopMembershipId = data?.membership?.id ?? null;
+    const email = data?.user?.email ?? data?.member?.email ?? null;
+    const userId = data?.metadata?.user_id ?? null;
+    const whopUserId = data?.user?.id ?? null;
+    const amount = eventType === "payment.succeeded" ? Number(data?.total ?? data?.amount ?? 0) : 0;
+    const whopPlanId = data?.plan?.id ?? data?.plan_id ?? null;
+    const productId = data?.product?.id ?? null;
+    const cardBrand = data?.card_brand ?? data?.payment_method?.card?.brand ?? null;
+    const cardLast4 = data?.card_last4 ?? data?.payment_method?.card?.last4 ?? null;
+    const paymentMethod = data?.payment_method_type ?? null;
+    const status = data?.status ?? data?.membership?.status ?? 'unknown';
+
+    // Match user_id by email if not in metadata
+    let matchedUserId = userId;
+    if (!matchedUserId && email) {
+      const rows = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`;
+      if (rows[0]) matchedUserId = rows[0].id;
+    }
+
+    // Insert payment record (skip if duplicate)
+    if (whopPaymentId || whopMembershipId) {
+      const uniqueId = whopPaymentId ?? `mem_${whopMembershipId}_${eventType}`;
+      await sql`
+        INSERT INTO payments (whop_payment_id, whop_membership_id, user_id, user_email, whop_user_id, amount_usd, currency, status, plan_id, product_id, card_brand, card_last4, payment_method, event_type, raw_payload)
+        VALUES (${uniqueId}, ${whopMembershipId}, ${matchedUserId}, ${email}, ${whopUserId}, ${amount}, 'usd', ${status}, ${whopPlanId}, ${productId}, ${cardBrand}, ${cardLast4}, ${paymentMethod}, ${eventType}, ${JSON.stringify(body)})
+        ON CONFLICT (whop_payment_id) DO NOTHING
+      `.catch(() => {});
+    }
+
+    if (eventType === "membership.activated" || eventType === "payment.succeeded") {
       if (whopPlanId && whopPlanId !== planId) {
         console.log(`[whop-webhook] Ignoring non-Pro plan: ${whopPlanId}`);
         return res.status(200).json({ received: true, ignored: true });
       }
 
-      // Try matching by user_id first, then by email
       let upgraded = false;
-      if (userId) {
-        await sql`UPDATE users SET plan = 'pro' WHERE id = ${userId}`;
-        console.log(`[whop-webhook] Upgraded user ${userId} to pro`);
+      if (matchedUserId) {
+        await sql`UPDATE users SET plan = 'pro' WHERE id = ${matchedUserId}`;
+        console.log(`[whop-webhook] Upgraded user ${matchedUserId} to pro`);
         upgraded = true;
-      }
-      if (!upgraded && email) {
-        const rows = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`;
-        if (rows[0]) {
-          await sql`UPDATE users SET plan = 'pro' WHERE id = ${rows[0].id}`;
-          console.log(`[whop-webhook] Upgraded user ${rows[0].id} to pro (matched by email: ${email})`);
-          upgraded = true;
-        } else {
-          console.log(`[whop-webhook] No user found with email: ${email}`);
-        }
       }
       if (!upgraded) {
         console.log(`[whop-webhook] Could not match any user for activation`);
       }
     } else if (eventType === "membership.deactivated") {
-      const userId = data?.metadata?.user_id ?? null;
-      const email = data?.user?.email ?? null;
-
-      if (userId) {
-        await sql`UPDATE users SET plan = 'free', monthly_revenue_usd = 0 WHERE id = ${userId}`;
-      } else if (email) {
-        const rows = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`;
-        if (rows[0]) await sql`UPDATE users SET plan = 'free', monthly_revenue_usd = 0 WHERE id = ${rows[0].id}`;
+      if (matchedUserId) {
+        await sql`UPDATE users SET plan = 'free', monthly_revenue_usd = 0 WHERE id = ${matchedUserId}`;
       }
     }
 
     return res.status(200).json({ received: true });
+  }
+
+  // ── Admin: Payments ─────────────────────────────────────────────────────
+  if (req.method === "GET" && path === "/admin/payments") {
+    const admin = await requireAdmin(String(req.query.token ?? ""));
+    if (!admin) return error(res, 401, "Unauthorized.");
+
+    const limit = Math.min(Number(req.query.limit ?? 100), 500);
+    const offset = Number(req.query.offset ?? 0);
+
+    const [payments, stats] = await Promise.all([
+      sql`SELECT p.*, u.username FROM payments p LEFT JOIN users u ON u.id = p.user_id ORDER BY p.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+      sql`SELECT count(*)::int as total, coalesce(sum(amount_usd),0)::numeric as revenue, count(*) filter (where event_type = 'payment.succeeded') as payment_count FROM payments`,
+    ]);
+
+    return res.status(200).json({
+      payments: payments.map((p: any) => ({
+        id: p.id,
+        whopPaymentId: p.whop_payment_id,
+        whopMembershipId: p.whop_membership_id,
+        userId: p.user_id,
+        username: p.username ?? null,
+        email: p.user_email,
+        amount: Number(p.amount_usd),
+        currency: p.currency,
+        status: p.status,
+        planId: p.plan_id,
+        productId: p.product_id,
+        cardBrand: p.card_brand,
+        cardLast4: p.card_last4,
+        paymentMethod: p.payment_method,
+        eventType: p.event_type,
+        createdAt: p.created_at,
+      })),
+      stats: {
+        total: stats[0]?.total ?? 0,
+        revenue: Number(stats[0]?.revenue ?? 0),
+        paymentCount: stats[0]?.payment_count ?? 0,
+      },
+    });
   }
 
   return error(res, 404, "Not found.");
