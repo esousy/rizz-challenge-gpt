@@ -840,25 +840,36 @@ async function route(req: any, res: any) {
 
     const planId = process.env.WHOP_PRO_PLAN_ID ?? "plan_Dxtf7y0t3JZUA";
 
-    if (eventType === "membership.activated") {
+    if (eventType === "membership.activated" || eventType === "payment.succeeded") {
       const userId = data?.metadata?.user_id ?? null;
-      const email = data?.user?.email ?? null;
-      const whopPlanId = data?.plan_id ?? null;
+      // Email can be at data.user.email (payment) or data.member.email (membership)
+      const email = data?.user?.email ?? data?.member?.email ?? null;
+      const whopPlanId = data?.plan?.id ?? data?.plan_id ?? null;
 
-      if (whopPlanId !== planId) {
+      if (whopPlanId && whopPlanId !== planId) {
         console.log(`[whop-webhook] Ignoring non-Pro plan: ${whopPlanId}`);
         return res.status(200).json({ received: true, ignored: true });
       }
 
+      // Try matching by user_id first, then by email
+      let upgraded = false;
       if (userId) {
         await sql`UPDATE users SET plan = 'pro' WHERE id = ${userId}`;
         console.log(`[whop-webhook] Upgraded user ${userId} to pro`);
-      } else if (email) {
+        upgraded = true;
+      }
+      if (!upgraded && email) {
         const rows = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`;
         if (rows[0]) {
           await sql`UPDATE users SET plan = 'pro' WHERE id = ${rows[0].id}`;
-          console.log(`[whop-webhook] Upgraded user ${rows[0].id} to pro (matched by email)`);
+          console.log(`[whop-webhook] Upgraded user ${rows[0].id} to pro (matched by email: ${email})`);
+          upgraded = true;
+        } else {
+          console.log(`[whop-webhook] No user found with email: ${email}`);
         }
+      }
+      if (!upgraded) {
+        console.log(`[whop-webhook] Could not match any user for activation`);
       }
     } else if (eventType === "membership.deactivated") {
       const userId = data?.metadata?.user_id ?? null;
