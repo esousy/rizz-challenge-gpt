@@ -9,6 +9,7 @@ import {
   SaveProgressModal,
 } from "@/components/SaveProgressModal";
 import { TypingIndicator } from "@/components/TypingIndicator";
+import { UnlockFeaturesModal } from "@/components/UnlockFeaturesModal";
 import { UpgradeModal } from "@/components/UpgradeModal";
 import { useAssistance } from "@/hooks/use-assistance";
 import { useAuth } from "@/hooks/use-auth";
@@ -296,14 +297,21 @@ export default function Challenge() {
   }, [backendActor, actorFetching]);
 
   // Mirror upgrade modal signals from assistance hook
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: stable clearUpgradeModal ref
   useEffect(() => {
     if (assistance.shouldShowUpgradeModal && assistance.upgradeModalTrigger) {
-      setUpgradeTrigger(assistance.upgradeModalTrigger);
-      setShowUpgradeModal(true);
+      if (!isAuthenticated) {
+        // Anonymous user — show unlock features modal (sign up)
+        setShowUnlockModal(true);
+      } else {
+        setUpgradeTrigger(assistance.upgradeModalTrigger);
+        setShowUpgradeModal(true);
+      }
       assistance.dismissUpgradeModal();
     }
-  }, [assistance.shouldShowUpgradeModal, assistance.upgradeModalTrigger]);
+  }, [assistance.shouldShowUpgradeModal, assistance.upgradeModalTrigger, isAuthenticated]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -565,9 +573,15 @@ export default function Challenge() {
         </div>
       )}
 
-      {/* Upgrade modal — shown when free user hits a plan limit */}
+      {/* Unlock features modal — shown when anonymous user hits a limit */}
+      <UnlockFeaturesModal
+        isOpen={showUnlockModal}
+        onClose={() => setShowUnlockModal(false)}
+      />
+
+      {/* Upgrade modal — shown when authenticated free user hits a plan limit */}
       <UpgradeModal
-        isOpen={showUpgradeModal}
+        isOpen={showUpgradeModal && isAuthenticated}
         trigger={upgradeModalTrigger}
         onClose={() => setShowUpgradeModal(false)}
         userId={auth.user?.id}
