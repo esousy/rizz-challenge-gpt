@@ -58,7 +58,7 @@ export function UnlockFeaturesModal({ isOpen, onClose }: Props) {
 
   // Reset on close
   useEffect(() => {
-    if (!isVisible) {
+    if (!isOpen) {
       setSuUsername("");
       setSuEmail("");
       setSuPassword("");
