@@ -41,19 +41,23 @@ export function UpgradeModal({ isOpen, trigger, onClose, userId, userEmail }: Pr
   const [loading, setLoading] = useState(false);
 
   async function handleUpgrade() {
-    if (!userId || !userEmail) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/app/whop-checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, email: userEmail }),
-      });
-      const data = await res.json() as { url?: string; error?: string };
-      if (data.url) {
-        window.location.href = data.url;
+      if (userId && userEmail) {
+        const res = await fetch("/api/app/whop-checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, email: userEmail }),
+        });
+        const data = await res.json() as { url?: string; error?: string };
+        if (data.url) {
+          window.location.href = data.url;
+        } else {
+          console.error("[UpgradeModal] Checkout error:", data.error);
+        }
       } else {
-        console.error("[UpgradeModal] Checkout error:", data.error);
+        // Anonymous user — redirect directly to Whop checkout
+        window.location.href = "https://whop.com/checkout/plan_Dxtf7y0t3JZUA";
       }
     } catch (err) {
       console.error("[UpgradeModal] Checkout failed:", err);
@@ -159,7 +163,7 @@ export function UpgradeModal({ isOpen, trigger, onClose, userId, userEmail }: Pr
                   data-ocid="upgrade_modal.cta_button"
                   className="w-full h-12 rounded-2xl bg-gradient-to-r from-[oklch(0.65_0.22_280)] to-[oklch(0.6_0.26_310)] text-white font-display font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-60"
                   onClick={handleUpgrade}
-                  disabled={loading || !userId}
+                  disabled={loading}
                 >
                   {loading ? (
                     <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
