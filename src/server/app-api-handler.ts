@@ -835,6 +835,8 @@ async function route(req: any, res: any) {
     const eventType = body?.event ?? body?.type;
     const data = body?.data ?? body;
     console.log(`[whop-webhook] Received: ${eventType}`);
+    console.log(`[whop-webhook] Body:`, JSON.stringify(body).slice(0, 2000));
+    console.log(`[whop-webhook] Data:`, JSON.stringify(data).slice(0, 2000));
 
     const planId = process.env.WHOP_PRO_PLAN_ID ?? "plan_Dxtf7y0t3JZUA";
 
