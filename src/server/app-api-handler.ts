@@ -815,6 +815,76 @@ async function route(req: any, res: any) {
     return res.status(200).json({ ok: true });
   }
 
+  // ── Whop Checkout ──────────────────────────────────────────────────────
+  if (req.method === "POST" && path === "/whop-checkout") {
+    const { userId, email } = body;
+    if (!userId || !email) return error(res, 400, "userId and email required");
+
+    const whopKey = process.env.WHOP_API_KEY ?? "";
+    const planId = process.env.WHOP_PRO_PLAN_ID ?? "plan_Dxtf7y0t3JZUA";
+    if (!whopKey) return error(res, 500, "Whop not configured");
+
+    try {
+      const whopRes = await fetch("https://api.whop.com/api/v2/checkouts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${whopKey}` },
+        body: JSON.stringify({ plan_id: planId, metadata: { user_id: userId, email } }),
+      });
+      const whopData = await whopRes.json() as any;
+      if (!whopRes.ok) {
+        console.error("[whop-checkout] Error:", whopData);
+        return error(res, 500, "Failed to create checkout");
+      }
+      return res.status(200).json({ url: whopData.checkout_url ?? whopData.url });
+    } catch (err) {
+      console.error("[whop-checkout] Error:", err);
+      return error(res, 500, "Checkout failed");
+    }
+  }
+
+  // ── Whop Webhook ─────────────────────────────────────────────────────────
+  if (req.method === "POST" && path === "/whop-webhook") {
+    const eventType = body?.event ?? body?.type;
+    const data = body?.data ?? body;
+    console.log(`[whop-webhook] Received: ${eventType}`);
+
+    const planId = process.env.WHOP_PRO_PLAN_ID ?? "plan_Dxtf7y0t3JZUA";
+
+    if (eventType === "membership.activated") {
+      const userId = data?.metadata?.user_id ?? null;
+      const email = data?.user?.email ?? null;
+      const whopPlanId = data?.plan_id ?? null;
+
+      if (whopPlanId !== planId) {
+        console.log(`[whop-webhook] Ignoring non-Pro plan: ${whopPlanId}`);
+        return res.status(200).json({ received: true, ignored: true });
+      }
+
+      if (userId) {
+        await sql`UPDATE users SET plan = 'pro' WHERE id = ${userId}`;
+        console.log(`[whop-webhook] Upgraded user ${userId} to pro`);
+      } else if (email) {
+        const rows = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`;
+        if (rows[0]) {
+          await sql`UPDATE users SET plan = 'pro' WHERE id = ${rows[0].id}`;
+          console.log(`[whop-webhook] Upgraded user ${rows[0].id} to pro (matched by email)`);
+        }
+      }
+    } else if (eventType === "membership.deactivated") {
+      const userId = data?.metadata?.user_id ?? null;
+      const email = data?.user?.email ?? null;
+
+      if (userId) {
+        await sql`UPDATE users SET plan = 'free', monthly_revenue_usd = 0 WHERE id = ${userId}`;
+      } else if (email) {
+        const rows = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`;
+        if (rows[0]) await sql`UPDATE users SET plan = 'free', monthly_revenue_usd = 0 WHERE id = ${rows[0].id}`;
+      }
+    }
+
+    return res.status(200).json({ received: true });
+  }
+
   return error(res, 404, "Not found.");
 }
 

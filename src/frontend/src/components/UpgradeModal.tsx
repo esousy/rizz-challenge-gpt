@@ -44,7 +44,7 @@ export function UpgradeModal({ isOpen, trigger, onClose }: Props) {
     if (!user) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/whop-checkout", {
+      const res = await fetch("/api/app/whop-checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: user.id, email: user.email }),
