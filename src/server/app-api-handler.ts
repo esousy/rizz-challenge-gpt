@@ -921,6 +921,29 @@ async function route(req: any, res: any) {
     const admin = await requireAdmin(String(req.query.token ?? ""));
     if (!admin) return error(res, 401, "Unauthorized.");
 
+    // Ensure payments table exists
+    await sql`CREATE TABLE IF NOT EXISTS payments (
+      id serial primary key,
+      whop_payment_id text unique,
+      whop_membership_id text,
+      user_id uuid references users(id) on delete set null,
+      user_email text,
+      whop_user_id text,
+      amount_usd numeric(10,2) not null default 0,
+      currency text default 'usd',
+      status text not null default 'pending',
+      plan_id text,
+      product_id text,
+      card_brand text,
+      card_last4 text,
+      payment_method text,
+      event_type text not null,
+      raw_payload jsonb,
+      created_at timestamptz not null default now()
+    )`.catch(() => {});
+    await sql`CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)`.catch(() => {});
+    await sql`CREATE INDEX IF NOT EXISTS idx_payments_whop_payment_id ON payments(whop_payment_id)`.catch(() => {});
+
     const limit = Math.min(Number(req.query.limit ?? 100), 500);
     const offset = Number(req.query.offset ?? 0);
 
