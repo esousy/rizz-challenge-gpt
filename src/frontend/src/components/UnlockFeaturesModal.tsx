@@ -116,7 +116,7 @@ export function UnlockFeaturesModal({ isOpen, onClose }: Props) {
     try {
       const result = await signup(suUsername, suEmail, suPassword);
       if (result.error) { setSuError(result.error); }
-      else { onClose(); }
+      else { onClose(); window.location.reload(); }
     } finally { setSuLoading(false); }
   }
 
@@ -129,7 +129,7 @@ export function UnlockFeaturesModal({ isOpen, onClose }: Props) {
     try {
       const result = await login(liIdentifier, liPassword);
       if (result.error) { setLiError(result.error); }
-      else { onClose(); }
+      else { onClose(); window.location.reload(); }
     } finally { setLiLoading(false); }
   }
 
