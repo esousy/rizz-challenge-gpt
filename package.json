@@ -18,7 +18,8 @@
     "sharp": "^0.34.4"
   },
   "dependencies": {
+    "@caffeineai/core-infrastructure": "^0.3.0",
     "@neondatabase/serverless": "^1.0.2",
-    "@caffeineai/core-infrastructure": "^0.3.0"
+    "@whop/sdk": "^0.0.39"
   }
 }
