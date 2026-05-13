@@ -816,7 +816,8 @@ async function route(req: any, res: any) {
   }
 
   // ── Whop Checkout ──────────────────────────────────────────────────────
-  if (req.method === "POST" && path === "/whop-checkout") {
+  if (path === "/whop-checkout") {
+    if (req.method === "GET") return res.status(200).json({ ok: true, msg: "whop-checkout endpoint" });
     const body = req.body ?? {};
     const { userId, email } = body;
     if (!userId || !email) return error(res, 400, "userId and email required");
