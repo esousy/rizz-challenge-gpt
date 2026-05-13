@@ -834,8 +834,8 @@ async function route(req: any, res: any) {
       });
       const whopData = await whopRes.json() as any;
       if (!whopRes.ok) {
-        console.error("[whop-checkout] Error:", whopData);
-        return error(res, 500, "Failed to create checkout");
+        console.error("[whop-checkout] Error:", JSON.stringify(whopData));
+        return res.status(500).json({ error: "Failed to create checkout", details: whopData });
       }
       return res.status(200).json({ url: whopData.checkout_url ?? whopData.url });
     } catch (err) {
