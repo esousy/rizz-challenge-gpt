@@ -7,7 +7,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const body = typeof req.body === "string" ? JSON.body : req.body ?? {};
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : (req.body ?? {});
     // Whop sends the webhook signature in the Whop-Signature header
     const signature = req.headers["whop-signature"] ?? "";
     const result = await handleWhopWebhook(body, signature);
