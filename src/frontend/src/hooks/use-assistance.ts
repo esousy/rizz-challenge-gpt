@@ -7,11 +7,16 @@
  */
 import { appApi } from "@/lib/app-api";
 import { getAnonymousId } from "@/hooks/use-ranked-session";
-import type { AssistanceState, UpgradeModalTrigger } from "@/types";
+import type { AssistanceState, FreePlanConfig, UpgradeModalTrigger } from "@/types";
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "./use-auth";
 
-export function useAssistance() {
+interface UseAssistanceOptions {
+  isPro?: boolean;
+  freePlanConfig?: FreePlanConfig | null;
+}
+
+export function useAssistance(_options: UseAssistanceOptions = {}) {
   const auth = useAuth();
 
   const [hintsUsed, setHintsUsed] = useState(0);
@@ -23,7 +28,8 @@ export function useAssistance() {
 
   // Upgrade modal state
   const [shouldShowUpgradeModal, setShouldShowUpgradeModal] = useState(false);
-  const [upgradeModalTrigger, setUpgradeModalTrigger] = useState<UpgradeModalTrigger>(null);
+  const [upgradeModalTrigger, setUpgradeModalTrigger] =
+    useState<UpgradeModalTrigger | null>(null);
 
   // Fetch current usage from backend
   const refreshUsage = useCallback(async () => {
@@ -73,7 +79,7 @@ export function useAssistance() {
     });
 
     if (!check.allowed) {
-      const trigger: UpgradeModalTrigger = auth.isAuthenticated ? "upgrade" : "signup";
+      const trigger: UpgradeModalTrigger = "hints";
       setUpgradeModalTrigger(trigger);
       setShouldShowUpgradeModal(true);
       return { allowed: false, reason: "limit_reached", upgradeModal: trigger };
@@ -104,7 +110,7 @@ export function useAssistance() {
     });
 
     if (!check.allowed) {
-      const trigger: UpgradeModalTrigger = auth.isAuthenticated ? "upgrade" : "signup";
+      const trigger: UpgradeModalTrigger = "rizz_assist";
       setUpgradeModalTrigger(trigger);
       setShouldShowUpgradeModal(true);
       return { allowed: false, reason: "limit_reached", upgradeModal: trigger };
@@ -153,3 +159,5 @@ export function useAssistance() {
     dismissUpgradeModal,
   };
 }
+
+export type UseAssistanceReturn = ReturnType<typeof useAssistance>;

@@ -386,7 +386,14 @@ async function requireAdmin(token?: string) {
 
 async function route(req: any, res: any) {
   const requestUrl = new URL(req.url ?? "/", "https://rizz.local");
-  const path = requestUrl.pathname.replace(/^\/api\/app/, "") || "/";
+  const queryPath = Array.isArray(req.query?.path)
+    ? req.query.path.join("/")
+    : typeof req.query?.path === "string"
+      ? req.query.path
+      : "";
+  const path = queryPath
+    ? `/${queryPath}`
+    : requestUrl.pathname.replace(/^\/api\/app/, "") || "/";
 
   if (req.method === "GET" && path === "/health") {
     return res.status(200).json({

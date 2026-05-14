@@ -33,6 +33,8 @@ export interface ProxyRequest {
   momentum: string;
   conversation_history: { role: string; content: string }[];
   character_profile: CharacterProfile;
+  userCategory?: string;
+  userId?: string | null;
 }
 
 // ── Fallback (used when proxy is unreachable) ────────────────────────────────

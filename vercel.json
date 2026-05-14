@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/app/:path*",
-      "destination": "/api/app"
+      "destination": "/api/app?path=:path*"
     },
     {
       "source": "/((?!api/.*).*)",
